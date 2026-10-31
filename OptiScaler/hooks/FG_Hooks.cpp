@@ -1165,16 +1165,11 @@ HRESULT FGHooks::FGPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags,
             // The argument must match the feature, not the swapchain: a native D3D12 feature on a Dx11wDx12
             // swapchain (Metro Redux) needs the D3D12 queue.
             namespace gts = FgGpuTimeSource;
-            const auto interop = state.swapchainInteropApi == SwapchainInteropApi::Dx11wDx12 ? gts::Interop::Dx11wDx12
-                                 : state.swapchainInteropApi == SwapchainInteropApi::None    ? gts::Interop::None
-                                                                                             : gts::Interop::Other;
-            const auto api = currentFeature->Api();
-            const auto kind = api == API::DX11               ? gts::FeatureKind::Dx11
-                              : api != API::DX12             ? gts::FeatureKind::Other
-                              : currentFeature->IsWithDx12() ? gts::FeatureKind::Dx12Wrapper
-                                                             : gts::FeatureKind::Dx12Native;
-            const auto source =
-                gts::Resolve(interop, kind, state.currentD3D11Device != nullptr, state.currentCommandQueue != nullptr);
+            const auto kind = gts::Classify(currentFeature->Api() == API::DX11, currentFeature->Api() == API::DX12,
+                                            currentFeature->IsWithDx12());
+            const bool hasD3D11Device =
+                state.swapchainInteropApi == SwapchainInteropApi::Dx11wDx12 && state.currentD3D11Device != nullptr;
+            const auto source = gts::Resolve(kind, hasD3D11Device, state.currentCommandQueue != nullptr);
 
             if (source == gts::Source::D3D11Context)
             {

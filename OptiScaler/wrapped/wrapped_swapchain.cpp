@@ -9,6 +9,7 @@
 #include <nvapi/fakenvapi.h>
 #include <hooks/Reflex_Hooks.h>
 #include <hooks/D3D12_Hooks.h>
+#include <hooks/FgGpuTimeSource.h>
 #include <framegen/smoothmotion/NVSmooth30Loader.h>
 
 #include <menu/menu_overlay_dx.h>
@@ -374,26 +375,26 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
         {
             std::optional<double> upscalerTimeOpt {};
 
-            if (cq != nullptr && currentFeature->Api() == API::DX12 && !currentFeature->IsWithDx12())
+            // One read, with the object the feature expects: a native D3D12 feature on a Dx11wDx12 swapchain
+            // (Metro Redux) must never get the D3D11 context.
+            namespace gts = FgGpuTimeSource;
+            ID3D11Device* d3d11Device = device;
+            if (d3d11Device == nullptr && State::Instance().swapchainInteropApi == SwapchainInteropApi::Dx11wDx12)
+                d3d11Device = State::Instance().currentD3D11Device;
+
+            const auto kind = gts::Classify(currentFeature->Api() == API::DX11, currentFeature->Api() == API::DX12,
+                                            currentFeature->IsWithDx12());
+            const auto source = gts::Resolve(kind, d3d11Device != nullptr, cq != nullptr);
+
+            if (source == gts::Source::D3D12Queue)
             {
                 if (upscalerTimeOpt = currentFeature->ReadUpscalerTime(cq); upscalerTimeOpt.has_value())
                     currentFeature->ReadDetailedGpuTimes(cq, State::Instance().detailedGpuTimes);
             }
-            else if (device != nullptr)
+            else if (source == gts::Source::D3D11Context)
             {
                 ID3D11DeviceContext* context = nullptr;
-                device->GetImmediateContext(&context);
-
-                if (upscalerTimeOpt = currentFeature->ReadUpscalerTime(context); upscalerTimeOpt.has_value())
-                    currentFeature->ReadDetailedGpuTimes(context, State::Instance().detailedGpuTimes);
-
-                context->Release();
-            }
-            if (State::Instance().swapchainInteropApi == SwapchainInteropApi::Dx11wDx12 &&
-                State::Instance().currentD3D11Device != nullptr)
-            {
-                ID3D11DeviceContext* context = nullptr;
-                State::Instance().currentD3D11Device->GetImmediateContext(&context);
+                d3d11Device->GetImmediateContext(&context);
 
                 if (upscalerTimeOpt = currentFeature->ReadUpscalerTime(context); upscalerTimeOpt.has_value())
                     currentFeature->ReadDetailedGpuTimes(context, State::Instance().detailedGpuTimes);
