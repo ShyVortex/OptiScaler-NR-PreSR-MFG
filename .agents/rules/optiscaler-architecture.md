@@ -144,6 +144,11 @@ description: Architecture, frame generation, and safety rules for OptiScaler
        - `passClamp` allocation for the halo filter (`DlssNr_Common::NeedsPassClamp`) only creates a texture; it must never rebuild models. `depthSmall` / `motionSmall` stay **out** of the `altSurfaces` swap set (guide formats do not follow colour format) and are released only on resolution/placement change or `ReleaseResources()`.
        - Documentation: `docs/issues/NR/NR-UPSTREAM-MERGE-6125A75.md`.
        - Associated tests: `tests/nr_halo_dx12_unit.cpp`, `tests/nr_history_rejection_unit.cpp`, `tests/nr_motion_scale_unit.cpp`, `tests/nr_ini_keys_unit.cpp`.
+     - **Direct NR Runtime After `FAIL_OutOfDate` Is Refused on Windows Only (Linux verified in-game, Metro 2033 Redux)**:
+       - On Windows, NGX `FAIL_OutOfDate` for feature 18 must never fall through to the direct compatibility runtime: forcing it there hung the GPU until reboot ([DLSS Unlocked #60](https://github.com/ShyVortex/DLSS-Unlocked/issues/60), driver 576.88).
+       - On Wine/Proton the refusal must **never** apply: the Linux driver's NGX has no NR feature and always answers `FAIL_OutOfDate`, so `DlssNr::CompatibilityRuntime` is the only NR path (`dec66857` broke NR on Linux in v0.9.80–v0.9.81; fixed in `6a7ad0ec`).
+       - `DlssNr_Proxy.cpp` and the "update to 610.88" status in `DlssNr_Dx12_Models.cpp` decide only through `DlssNr::DriverGate::RefusesDirectRuntime(result, ::State::Instance().isRunningOnLinux)`. Inside `DlssNr_Dx12::State` members the global singleton must be written `::State` (MSVC C2039 otherwise).
+       - Documentation: `docs/issues/NR/NR-OLD-DRIVER-HANG.md` (section 8). Associated test: `tests/nr_driver_gate_unit.cpp` (test 14).
 
 7. **Preservation of NVSmooth30 (RTX 30 Smooth Motion Unlocker) Integration Across Upstream Merges**:
    - Upstream author (`wilsjo2`) does not maintain the NVSmooth30 proxy integration.
@@ -223,6 +228,11 @@ description: Architecture, frame generation, and safety rules for OptiScaler
        - `state.WAR_xefgRequestFGToggle` guarded with `!XeMfgLoader::EnabledForSession()`, and `state.fgChanged = true;` never set in multiplier slider callback. Live adjustments via `SetNumInterpolatedFrames` must never call `Deactivate()`, `SetEnabled: false`, or pause presentation for 10 frames.
        - **Never call into the FG runtime from the overlay menu (verified in-game, DLSS Unlocked #57)**: the menu is drawn inside the real swapchain's Present, which XeFG issues from its own Present while `FGHooks::FGPresent` holds `fg->Mutex`. Menu multiplier changes must use `IFGFeature::RequestInterpolatedFrameCount`; `XeFG_Dx12` queues the value in `_pendingInterpolationCount` and applies it at the top of `XeFG_Dx12::Present()` on the game's present thread. `SetInterpolatedFrameCount` must not take `fg->Mutex` (non-recursive; `f904ab52` deadlocked). The synchronous Streamline `slDLSSGSetOptions` path is unaffected.
          - Documentation: `docs/issues/FG/FG-XEFG-MENU-MULTIPLIER-FREEZE.md`. Associated test: `tests/xefg_menu_multiplier_queue_unit.cpp`.
+     - **Upscaler GPU-Time Read Chosen by Feature Type (verified in-game, Metro 2033 Redux)**:
+       - `LocalPresent` (`wrapped_swapchain.cpp`) and `FGHooks::FGPresent` must pick the argument of `IFeature::ReadUpscalerTime` / `ReadDetailedGpuTimes` through `FgGpuTimeSource::Classify` + `Resolve` (`OptiScaler/hooks/FgGpuTimeSource.h`): native D3D12 features get the D3D12 queue, D3D11 features the D3D11 context, the `Dx11wDx12` / `VkwDx12` wrappers whichever exists, anything else skips the read. Never choose by swapchain interop: a game with D3D12 NGX and a D3D11 swapchain (Metro Redux) gets a native D3D12 feature on a `Dx11wDx12` swapchain, and a D3D11 context passed to it crashed inside `d3d11` after the intro.
+       - Read once per present: the GPU-time rings advance on every read.
+       - `metro.exe` carries `ForceBorderlessWhenUsingXeFG`: the game uses exclusive fullscreen, where XeSS-FG does not interpolate.
+       - Documentation: `docs/issues/FG/FG-DX11WDX12-NATIVE-DX12-GPUTIME-CRASH.md`. Associated test: `tests/fg_gputime_source_unit.cpp`.
      - **FrameRenderTime Sanity Floor Fallback (`XeFG_Dx12.cpp`)**:
        - In `XeFG_Dx12::Dispatch`, if `frameRenderTime < 1.0` or `< 0.25 * _ftDelta[fIndex]`, fallback to `_ftDelta[fIndex]` to stabilize optical flow motion vectors and eliminate judder.
      - **In-Game Menu UI & Section Suppression (`OptiScaler/menu/menu_common.cpp`)**:
