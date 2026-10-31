@@ -186,9 +186,10 @@ bool DlssNr_Dx12::State::PrepareRunModels(ID3D12GraphicsCommandList* cmdList, ID
                 if (pass == 0)
                 {
                     nr.failed = true;
-                    if (prepared == DlssNr::DriverGate::NgxResultOutOfDate)
+                    if (DlssNr::DriverGate::RefusesDirectRuntime(prepared, State::Instance().isRunningOnLinux))
                     {
-                        // No placement or resolution change helps; only a driver update does.
+                        // No placement or resolution change helps; only a driver update does. Not on Wine, where
+                        // a Windows driver version means nothing.
                         nr.reason = DlssNr::DriverGate::UnsupportedDriverReason;
                     }
                     else if (!frame.BeforeUpscale)

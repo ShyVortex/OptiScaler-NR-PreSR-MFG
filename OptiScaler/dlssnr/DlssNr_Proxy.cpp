@@ -5,6 +5,7 @@
 #include "DlssNr_CompatibilityRuntime.h"
 #include "DlssNr_PrivateCreation.h"
 #include "DlssNr_DriverGate.h"
+#include <State.h>
 
 #include <Logger.h>
 #include <proxies/NVNGX_Proxy.h>
@@ -188,8 +189,10 @@ unsigned int Context::Impl::Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12De
         LOG_INFO("NR diagnostic CreateFeature(18): result=0x{:08X} handle={}", (unsigned) created,
                  (void*) state.feature);
         // FAIL_OutOfDate means the driver lacks NR support, not a loader rejection. Forcing the direct runtime past
-        // it hung the GPU until reboot (DLSS Unlocked #60), so only other failures fall back.
-        if ((unsigned int) created == DriverGate::NgxResultOutOfDate && !state.feature)
+        // it on Windows hung the GPU until reboot (DLSS Unlocked #60), so only other failures fall back there. On
+        // Wine the Linux NGX always answers FAIL_OutOfDate and the direct runtime is the only NR path.
+        if (DriverGate::RefusesDirectRuntime((unsigned int) created, State::Instance().isRunningOnLinux) &&
+            !state.feature)
             LOG_ERROR("DLSS-NR (driver): {}; not trying the direct runtime", DriverGate::UnsupportedDriverReason);
         else if (NVSDK_NGX_FAILED(created) && !state.feature)
         {

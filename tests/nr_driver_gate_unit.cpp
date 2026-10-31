@@ -24,8 +24,11 @@
 // 9. The menu disables "Enable Neural Rendering", explains why, and never writes the setting while blocked.
 // 10. The NR hotkey shows the message instead of toggling, and no other code path writes DlssNrEnabled.
 // 11. The FAIL_OutOfDate reason names the same minimum and recommended versions as the gate.
-// 12. The proxy never opens the direct runtime after FAIL_OutOfDate; every other failure still falls back.
-// 13. The status shows the driver reason for FAIL_OutOfDate and keeps the contextual display-resolution message.
+// 12. On Windows the proxy never opens the direct runtime after FAIL_OutOfDate; every other failure still falls back.
+// 13. The status shows the driver reason for FAIL_OutOfDate on Windows and keeps the contextual display-resolution
+//     message.
+// 14. Wine/Proton is exempt from the FAIL_OutOfDate refusal: the Linux NGX has no NR feature and always answers it,
+//     and the direct runtime is the only NR path there (broken on Linux in v0.9.80-v0.9.81).
 
 using namespace DlssNr::DriverGate;
 
@@ -175,8 +178,8 @@ int main()
     // Test 12
     const auto creation = Between(proxy, "D3D12_CreateFeature()(cmdList, (NVSDK_NGX_Feature) 18",
                                   "NgxDiagnostics::RuntimeReport(cmdList, device, \"after CreateFeature(18)\");");
-    const auto outOfDate =
-        creation.find("if ((unsigned int) created == DriverGate::NgxResultOutOfDate && !state.feature)");
+    const auto outOfDate = creation.find(
+        "if (DriverGate::RefusesDirectRuntime((unsigned int) created, State::Instance().isRunningOnLinux)");
     const auto fallback = creation.find("else if (NVSDK_NGX_FAILED(created) && !state.feature)");
     const auto firstOpen = creation.find("CompatibilityRuntime::");
     assert(outOfDate != std::string::npos && fallback != std::string::npos && firstOpen != std::string::npos);
@@ -190,7 +193,8 @@ int main()
 
     // Test 13
     const auto failure = Between(models, "nr.passCreateFailed[pass] = true;", "LOG_ERROR(");
-    const auto driverReason = failure.find("if (prepared == DlssNr::DriverGate::NgxResultOutOfDate)");
+    const auto driverReason =
+        failure.find("if (DlssNr::DriverGate::RefusesDirectRuntime(prepared, State::Instance().isRunningOnLinux))");
     const auto displayReason = failure.find("else if (!frame.BeforeUpscale)");
     assert(driverReason != std::string::npos && displayReason != std::string::npos && driverReason < displayReason);
     assert(failure.find("nr.reason = DlssNr::DriverGate::UnsupportedDriverReason;") != std::string::npos);
@@ -198,6 +202,19 @@ int main()
            "the fork's contextual driver error must remain");
     std::puts("Test 13 PASS: status explains the driver, contextual resolution message preserved");
 
-    std::puts("All NR driver gate tests passed (13/13).");
+    // Test 14
+    static_assert(RefusesDirectRuntime(NgxResultOutOfDate, false), "Windows: OutOfDate refuses the direct runtime");
+    static_assert(!RefusesDirectRuntime(NgxResultOutOfDate, true), "Wine: OutOfDate still falls back");
+    static_assert(!RefusesDirectRuntime(0xBAD00004u, false) && !RefusesDirectRuntime(0xBAD00004u, true),
+                  "other failures fall back on both");
+    static_assert(!RefusesDirectRuntime(1u, false) && !RefusesDirectRuntime(1u, true), "success is never refused");
+    assert(proxy.find("#include <State.h>") != std::string::npos);
+    assert(proxy.find("NgxResultOutOfDate") == std::string::npos &&
+           "the proxy decides only through RefusesDirectRuntime");
+    assert(models.find("prepared == DlssNr::DriverGate::NgxResultOutOfDate") == std::string::npos &&
+           "the status decides only through RefusesDirectRuntime");
+    std::puts("Test 14 PASS: the FAIL_OutOfDate refusal is Windows-only; Wine falls back to the direct runtime");
+
+    std::puts("All NR driver gate tests passed (14/14).");
     return 0;
 }
