@@ -179,7 +179,7 @@ int main()
     const auto creation = Between(proxy, "D3D12_CreateFeature()(cmdList, (NVSDK_NGX_Feature) 18",
                                   "NgxDiagnostics::RuntimeReport(cmdList, device, \"after CreateFeature(18)\");");
     const auto outOfDate = creation.find(
-        "if (DriverGate::RefusesDirectRuntime((unsigned int) created, State::Instance().isRunningOnLinux)");
+        "if (DriverGate::RefusesDirectRuntime((unsigned int) created, ::State::Instance().isRunningOnLinux)");
     const auto fallback = creation.find("else if (NVSDK_NGX_FAILED(created) && !state.feature)");
     const auto firstOpen = creation.find("CompatibilityRuntime::");
     assert(outOfDate != std::string::npos && fallback != std::string::npos && firstOpen != std::string::npos);
@@ -194,7 +194,7 @@ int main()
     // Test 13
     const auto failure = Between(models, "nr.passCreateFailed[pass] = true;", "LOG_ERROR(");
     const auto driverReason =
-        failure.find("if (DlssNr::DriverGate::RefusesDirectRuntime(prepared, State::Instance().isRunningOnLinux))");
+        failure.find("if (DlssNr::DriverGate::RefusesDirectRuntime(prepared, ::State::Instance().isRunningOnLinux))");
     const auto displayReason = failure.find("else if (!frame.BeforeUpscale)");
     assert(driverReason != std::string::npos && displayReason != std::string::npos && driverReason < displayReason);
     assert(failure.find("nr.reason = DlssNr::DriverGate::UnsupportedDriverReason;") != std::string::npos);
@@ -213,6 +213,10 @@ int main()
            "the proxy decides only through RefusesDirectRuntime");
     assert(models.find("prepared == DlssNr::DriverGate::NgxResultOutOfDate") == std::string::npos &&
            "the status decides only through RefusesDirectRuntime");
+    // Inside DlssNr_Dx12::State members a bare State names the nested class (MSVC C2039), so the global singleton
+    // must be qualified.
+    assert(models.find(" State::Instance()") == std::string::npos &&
+           models.find("(State::Instance()") == std::string::npos);
     std::puts("Test 14 PASS: the FAIL_OutOfDate refusal is Windows-only; Wine falls back to the direct runtime");
 
     std::puts("All NR driver gate tests passed (14/14).");
