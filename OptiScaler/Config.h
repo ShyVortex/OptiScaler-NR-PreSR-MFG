@@ -265,6 +265,9 @@ class Config
     // DLSS Neural Rendering: a detail-synthesis pass over the upscaler's output. Off by default -- it is
     // an undocumented feature driven directly through its snippet, not something NVIDIA exposes.
     CustomOptional<bool> DlssNrEnabled { false };
+    // Report a game's own NR option (NGX feature 18) as supported when the driver refuses it for this GPU, and run
+    // it through the direct runtime. Never on Windows drivers without NR support (DlssNr_GameNr.h).
+    CustomOptional<bool> DlssNrUnlockGameNr { true };
     // Run the NR pass on the upscaler's colour input, at render resolution, immediately before SR.
     // Off uses post-upscale placement. Default is true (Pre-SR).
     CustomOptional<bool> DlssNrRunBeforeSr { true };

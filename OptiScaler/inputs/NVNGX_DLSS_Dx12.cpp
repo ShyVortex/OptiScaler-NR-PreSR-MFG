@@ -32,6 +32,8 @@
 #include "detours/detours.h"
 #include <ankerl/unordered_dense.h>
 #include <misc/IdentifyGpu.h>
+#include <dlssnr/DlssNr_GameNr.h>
+#include <dlssnr/DlssNr_CompatibilityRuntime.h>
 
 static ankerl::unordered_dense::map<unsigned int, ContextData<IFeature_Dx12>> Dx12Contexts;
 static NgxFeatureRegistry HandleToFeature;
@@ -1020,6 +1022,45 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_ReleaseFeature(NVSDK_NGX_Handle* 
     return NVSDK_NGX_Result_Success;
 }
 
+// A game's own NR option (feature 18): ask the driver, then unlock it where DlssNr_GameNr.h allows.
+static NVSDK_NGX_Result GameNrFeatureRequirements(IDXGIAdapter* Adapter,
+                                                  const NVSDK_NGX_FeatureDiscoveryInfo* FeatureDiscoveryInfo,
+                                                  NVSDK_NGX_FeatureRequirement* OutSupported)
+{
+    static NVSDK_NGX_FeatureRequirement scratch {};
+    if (OutSupported == nullptr)
+        OutSupported = &scratch;
+
+    auto result = NVSDK_NGX_Result_FAIL_FeatureNotSupported;
+    OutSupported->FeatureSupported = NVSDK_NGX_FeatureSupportResult_AdapterUnsupported;
+
+    if (Config::Instance()->DLSSEnabled.value_or_default() && IdentifyGpu::getPrimaryGpu().dlssCapable)
+    {
+        if (NVNGXProxy::NVNGXModule() == nullptr)
+            NVNGXProxy::InitNVNGX();
+
+        if (NVNGXProxy::D3D12_GetFeatureRequirements() != nullptr)
+            result = NVNGXProxy::D3D12_GetFeatureRequirements()(Adapter, FeatureDiscoveryInfo, OutSupported);
+    }
+
+    const auto decision = DlssNr::GameNr::Decide(
+        State::Instance().isRunningOnLinux, Config::Instance()->DlssNrUnlockGameNr.value_or_default(),
+        !DlssNr::CompatibilityRuntime::CandidatePaths().empty(), DlssNr::DriverGate::Blocked(), (unsigned int) result,
+        (unsigned int) OutSupported->FeatureSupported);
+
+    LOG_INFO("DLSS-NR (game): GetFeatureRequirements(18) driver result 0x{:08X}, support bits 0x{:X} -> {}",
+             (unsigned int) result, (unsigned int) OutSupported->FeatureSupported,
+             DlssNr::GameNr::DecisionName(decision));
+
+    if (decision != DlssNr::GameNr::Decision::Unlock)
+        return result;
+
+    OutSupported->FeatureSupported = NVSDK_NGX_FeatureSupportResult_Supported;
+    OutSupported->MinHWArchitecture = 0;
+    strcpy_s(OutSupported->MinOSVersion, "10.0.10240.16384");
+    return NVSDK_NGX_Result_Success;
+}
+
 /**
  * @brief Used by the client application to check for feature support.
  * @param Adapter Device the feature is for.
@@ -1053,6 +1094,9 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_GetFeatureRequirements(
         strcpy_s(OutSupported->MinOSVersion, "10.0.10240.16384");
         return NVSDK_NGX_Result_Success;
     }
+
+    if (FeatureDiscoveryInfo->FeatureID == (NVSDK_NGX_Feature) DlssNr::GameNr::FeatureId)
+        return GameNrFeatureRequirements(Adapter, FeatureDiscoveryInfo, OutSupported);
 
     if (Config::Instance()->DLSSEnabled.value_or_default() && IdentifyGpu::getPrimaryGpu().dlssCapable &&
         NVNGXProxy::NVNGXModule() == nullptr)

@@ -541,6 +541,7 @@ bool Config::Reload(std::filesystem::path iniPath)
 
             // --- DLSS 5 Neural Rendering (OptiScaler/dlssnr) ---
             DlssNrEnabled.set_from_config(readBool("DlssNr", "Enabled"));
+            DlssNrUnlockGameNr.set_from_config(readBool("DlssNr", "UnlockGameNR"));
             auto nrBeforeSr = readBool("DlssNr", "RunBeforeSR");
             if (!nrBeforeSr.has_value())
                 nrBeforeSr = readBool("DlssNr", "BeforeUpscale");
@@ -1521,6 +1522,7 @@ bool Config::SaveIni(std::filesystem::path destination)
 
         // --- DLSS 5 Neural Rendering (OptiScaler/dlssnr) ---
         ini.SetValue("DlssNr", "Enabled", GetBoolValue(Instance()->DlssNrEnabled.value_for_config()).c_str());
+        ini.SetValue("DlssNr", "UnlockGameNR", GetBoolValue(Instance()->DlssNrUnlockGameNr.value_for_config()).c_str());
         ini.SetValue("DlssNr", "FinishedPicture",
                      GetBoolValue(Instance()->DlssNrFinishedPicture.value_for_config()).c_str());
         ini.SetValue("DlssNr", "HdrTransfer", GetBoolValue(Instance()->DlssNrHdrTransfer.value_for_config()).c_str());
