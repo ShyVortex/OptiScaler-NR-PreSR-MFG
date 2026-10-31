@@ -8,6 +8,7 @@
 #include "DlssNr_MenuSections.h"
 #include "DlssNr_Placement.h"
 #include "DlssNr_DriverGate.h"
+#include "DlssNr_OwnNr.h"
 #include <Config.h>
 #include <menu/menu_common.h>
 #include <algorithm>
@@ -58,6 +59,10 @@ static void RenderStatus(Config* config)
     if (!enabled)
     {
         ImGui::TextDisabled("NR off.");
+    }
+    else if (GameNr::Active())
+    {
+        ImGui::TextWrapped("%s", GameNrPausedMessage);
     }
     else if (!dx12.running && !vulkan)
     {

@@ -5,6 +5,7 @@
 #include <Logger.h>
 #include <d3d12.h>
 #include <algorithm>
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -16,6 +17,8 @@ namespace
 {
 std::mutex mutex;
 std::unordered_map<const NVSDK_NGX_Handle*, std::shared_ptr<CompatibilityRuntime>> live;
+// Read every frame by OptiScaler's own NR gate; mirrors live.size() without taking the lock.
+std::atomic<size_t> liveCount { 0 };
 // A runtime stays loaded until NGX shuts down: toggling NR in the game must not re-initialise it on the device, and
 // work recorded by the game's last create or evaluate may still be executing.
 std::vector<std::shared_ptr<CompatibilityRuntime>> retained;
@@ -56,6 +59,7 @@ NVSDK_NGX_Result CreateDirect(ID3D12GraphicsCommandList* commands, NVSDK_NGX_Par
         return result == NVSDK_NGX_Result_Success ? NVSDK_NGX_Result_Fail : result;
 
     live[*handle] = std::move(runtime);
+    liveCount.store(live.size(), std::memory_order_release);
     return result;
 }
 
@@ -94,6 +98,7 @@ NVSDK_NGX_Result Release(NVSDK_NGX_Handle* handle)
         {
             runtime = std::move(it->second);
             live.erase(it);
+            liveCount.store(live.size(), std::memory_order_release);
             RetainLocked(runtime);
         }
     }
@@ -105,11 +110,7 @@ NVSDK_NGX_Result Release(NVSDK_NGX_Handle* handle)
     return result;
 }
 
-bool Active()
-{
-    std::lock_guard lock(mutex);
-    return !live.empty();
-}
+bool Active() { return liveCount.load(std::memory_order_acquire) != 0; }
 
 void Shutdown()
 {
@@ -118,6 +119,7 @@ void Shutdown()
     {
         std::lock_guard lock(mutex);
         features.swap(live);
+        liveCount.store(0, std::memory_order_release);
         runtimes.swap(retained);
     }
 

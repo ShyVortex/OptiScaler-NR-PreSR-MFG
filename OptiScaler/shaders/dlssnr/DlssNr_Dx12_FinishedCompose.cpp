@@ -1,12 +1,12 @@
 ﻿#include "pch.h"
 #include "DlssNr_Dx12_State.h"
+#include <dlssnr/DlssNr_OwnNr.h>
 
 auto DlssNr_Dx12::State::ApplyFinishedColor(ID3D12Resource* color, ID3D12CommandQueue* queue,
                                             DXGI_COLOR_SPACE_TYPE colorSpace, bool gameFrameHandoff) -> bool
 {
-    if (!Config::Instance()->DlssNrFinishedPicture.value_or_default() ||
-        !Config::Instance()->DlssNrEnabled.value_or_default() || ::State::Instance().externalFrameGeneration ||
-        ::State::Instance().activeFgOutput == FGOutput::DLSSG)
+    if (!Config::Instance()->DlssNrFinishedPicture.value_or_default() || !DlssNr::OwnNrEnabled() ||
+        ::State::Instance().externalFrameGeneration || ::State::Instance().activeFgOutput == FGOutput::DLSSG)
     {
         late.Cancel();
         return false;

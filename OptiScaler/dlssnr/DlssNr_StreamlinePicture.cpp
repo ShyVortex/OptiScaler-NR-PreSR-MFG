@@ -5,6 +5,7 @@
 #include <State.h>
 #include <Util.h>
 #include <cstring>
+#include <dlssnr/DlssNr_OwnNr.h>
 
 namespace DlssNr::StreamlinePicture
 {
@@ -49,7 +50,7 @@ template <bool Local> struct Hooks
         if (State::Instance().isShuttingDown)
             return;
         const auto& cfg = *Config::Instance();
-        if (skip || (flags & DXGI_PRESENT_TEST) || !cfg.DlssNrEnabled.value_or_default() ||
+        if (skip || (flags & DXGI_PRESENT_TEST) || !DlssNr::OwnNrEnabled() ||
             !cfg.DlssNrFinishedPicture.value_or_default())
             return;
         auto queue = RenderQueue(swapchain);

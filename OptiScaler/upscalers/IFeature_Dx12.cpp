@@ -6,6 +6,7 @@
 #include "IFeature_Dx12.h"
 #include "State.h"
 #include <dlssnr/DlssNr_Pipeline_Dx12.h>
+#include <dlssnr/DlssNr_OwnNr.h>
 
 void IFeature_Dx12::ResourceBarrier(ID3D12GraphicsCommandList* InCommandList, ID3D12Resource* InResource,
                                     D3D12_RESOURCE_STATES InBeforeState, D3D12_RESOURCE_STATES InAfterState) const
@@ -79,7 +80,7 @@ bool IFeature_Dx12::Evaluate(ID3D12GraphicsCommandList* InCommandList, NVSDK_NGX
         return false;
     }
 
-    if (!NeuralRendering && Config::Instance()->DlssNrEnabled.value_or_default())
+    if (!NeuralRendering && DlssNr::OwnNrEnabled())
         NeuralRendering = std::make_unique<DlssNr_Dx12>("Neural Rendering", Device);
 
     // Hold the inputs shared by NR and SR, not just NR's colour. Restore temporary
@@ -162,16 +163,15 @@ bool IFeature_Dx12::Evaluate(ID3D12GraphicsCommandList* InCommandList, NVSDK_NGX
     // unsupported inputs retain ordinary NR. Once private NR owns its model initialization,
     // do not rebuild that shared history back to the ordinary placement in the same frame.
     DlssNr_Dx12::DenoiseFirstHandoff denoiseHandoff {};
-    if (NeuralRendering && !specializedNr && !interop && !useOutputScaling &&
-        Config::Instance()->DlssNrEnabled.value_or_default() &&
+    if (NeuralRendering && !specializedNr && !interop && !useOutputScaling && DlssNr::OwnNrEnabled() &&
         Config::Instance()->DlssNrDenoiseFirst.value_or_default() && DlssNr::CanRunBeforeUpscale_Dx12(InParameters))
         denoiseHandoff = NeuralRendering->DenoiseFirstBefore(InCommandList, InParameters, GetFeatureFlags(),
                                                              timingQueue, rayReconstruction, submissionEpoch);
     const bool denoiseFirst = denoiseHandoff.color || denoiseHandoff.replaceOutput || denoiseHandoff.modelEvaluated ||
                               denoiseHandoff.modelAttempted;
-    const bool nrBeforeUpscale =
-        NeuralRendering && !specializedNr && !denoiseFirst && Config::Instance()->DlssNrEnabled.value_or_default() &&
-        Config::Instance()->DlssNrRunBeforeSr.value_or_default() && DlssNr::CanRunBeforeUpscale_Dx12(InParameters);
+    const bool nrBeforeUpscale = NeuralRendering && !specializedNr && !denoiseFirst && DlssNr::OwnNrEnabled() &&
+                                 Config::Instance()->DlssNrRunBeforeSr.value_or_default() &&
+                                 DlssNr::CanRunBeforeUpscale_Dx12(InParameters);
 
     // Order is important as that's the order of shader dispatch
     ShaderPipeline_Dx12 pipeline;
@@ -274,8 +274,7 @@ bool IFeature_Dx12::Evaluate(ID3D12GraphicsCommandList* InCommandList, NVSDK_NGX
               } });
     }
 
-    if (NeuralRendering && !specializedNr && !nrBeforeUpscale && !denoiseFirst &&
-        Config::Instance()->DlssNrEnabled.value_or_default())
+    if (NeuralRendering && !specializedNr && !nrBeforeUpscale && !denoiseFirst && DlssNr::OwnNrEnabled())
     {
         LOG_DEBUG("IFeature_Dx12: Scheduling DLSS-NR post-upscale pass in pipeline");
         pipeline.push_back(MakeDlssNrPass(*NeuralRendering, Device, InCommandList, InParameters, false,

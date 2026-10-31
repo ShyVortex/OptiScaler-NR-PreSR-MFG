@@ -1,5 +1,6 @@
 ﻿#include "pch.h"
 #include "DlssNr_Dx12_State.h"
+#include <dlssnr/DlssNr_OwnNr.h>
 
 void DlssNr_Dx12::State::EvaluateInternal(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Parameter* params,
                                           bool beforeUpscale, ID3D12CommandQueue* queue, bool rayReconstruction,
@@ -24,7 +25,7 @@ void DlssNr_Dx12::State::EvaluateInternal(ID3D12GraphicsCommandList* cmd, NVSDK_
         deferredSr.Cancel();
         lastFinishedMode = finishedMode;
     }
-    if (!cfg.DlssNrEnabled.value_or_default())
+    if (!DlssNr::OwnNrEnabled())
     {
         deferredSr.Cancel();
         late.Cancel();

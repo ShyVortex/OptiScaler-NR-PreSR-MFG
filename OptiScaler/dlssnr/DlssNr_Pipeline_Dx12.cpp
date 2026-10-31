@@ -5,6 +5,7 @@
 #include <State.h>
 #include <shaders/dlssnr/DlssNr_Dx12.h>
 #include <shaders/dlssnr/DlssNr_ActiveColor.h>
+#include <dlssnr/DlssNr_OwnNr.h>
 
 namespace
 {
@@ -181,7 +182,7 @@ ShaderPass_Dx12 MakeDlssNrPass(DlssNr_Dx12& shader, ID3D12Device* device, ID3D12
     return {
         [=, &shader](ID3D12Resource* nextOutput) -> ID3D12Resource*
         {
-            if (!Config::Instance()->DlssNrEnabled.value_or_default())
+            if (!DlssNr::OwnNrEnabled())
                 return nullptr;
             if (!shader.IsInit())
             {
@@ -301,7 +302,7 @@ ID3D12Resource* PrepareDlssNrInput(DlssNr_Dx12& shader, ID3D12Device* device, ID
                                    uint64_t submissionEpoch)
 {
     auto* color = NrResource(parameters, NVSDK_NGX_Parameter_Color, "DLSSD.Color");
-    if (!Config::Instance()->DlssNrEnabled.value_or_default())
+    if (!DlssNr::OwnNrEnabled())
         return nullptr;
     if (color == nullptr)
     {

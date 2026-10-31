@@ -63,6 +63,8 @@ bool CanRestoreRootSignature(ID3D12GraphicsCommandList*) { return restorable; }
 } // namespace D3D12Hooks
 namespace DlssNr
 {
+// Seam for DlssNr_OwnNr.h: no game-owned NR feature in this fixture.
+inline bool OwnNrEnabled() { return Config::Instance()->DlssNrEnabled.value_or_default(); }
 static bool inputSupported = true;
 bool CanRunBeforeUpscale_Dx12(NVSDK_NGX_Parameter*) { return inputSupported; }
 struct Extent

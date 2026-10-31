@@ -9,6 +9,7 @@
 #include "precompile/dlssnr_spatial_Shader.h"
 #include "precompile/dlssnr_spatial_guides_Shader.h"
 #include "precompile/dlssnr_denoise_first_Shader.h"
+#include <dlssnr/DlssNr_OwnNr.h>
 
 namespace
 {
@@ -656,7 +657,7 @@ bool DlssNr_Dx12::ProcessSeam(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Paramete
     const bool special = placement.finished || placement.deferred;
     // Denoise first owns the ordinary seams in IFeature_Dx12; drop its private features when it is not the active mode.
     if (beforeUpscale)
-        _state->denoiseFirst.Idle(!special && !interop && cfg.DlssNrEnabled.value_or_default() &&
+        _state->denoiseFirst.Idle(!special && !interop && DlssNr::OwnNrEnabled() &&
                                   cfg.DlssNrDenoiseFirst.value_or_default() &&
                                   DlssNr::CanRunBeforeUpscale_Dx12(params));
     if (special)
@@ -863,9 +864,8 @@ void DlssNr_Dx12::ApplyFinished(ID3D12Resource* picture, ID3D12CommandQueue* que
                                 bool gameFrameHandoff)
 {
     std::lock_guard lock(_state->mutex);
-    if (!Config::Instance()->DlssNrFinishedPicture.value_or_default() ||
-        !Config::Instance()->DlssNrEnabled.value_or_default() || ::State::Instance().externalFrameGeneration ||
-        ::State::Instance().activeFgOutput == FGOutput::DLSSG)
+    if (!Config::Instance()->DlssNrFinishedPicture.value_or_default() || !DlssNr::OwnNrEnabled() ||
+        ::State::Instance().externalFrameGeneration || ::State::Instance().activeFgOutput == FGOutput::DLSSG)
         _state->late.Cancel();
     else if (picture && queue)
         _state->ApplyFinishedColor(picture, queue, space, gameFrameHandoff);
@@ -998,8 +998,8 @@ void ApplyToFinishedPicture(IDXGISwapChain* swapchain, ID3D12CommandQueue* queue
     const bool externalFgActive =
         ::State::Instance().externalFrameGeneration || ::State::Instance().activeFgOutput == FGOutput::DLSSG;
     // Swapchain calls must precede NR locks: FG Present can submit commands while holding its own lock.
-    if (swapchain && queue && config.DlssNrEnabled.value_or_default() &&
-        config.DlssNrFinishedPicture.value_or_default() && !externalFgActive)
+    if (swapchain && queue && DlssNr::OwnNrEnabled() && config.DlssNrFinishedPicture.value_or_default() &&
+        !externalFgActive)
     {
         if (StreamlinePicture::RenderQueue(swapchain) || FAILED(swapchain->QueryInterface(IID_PPV_ARGS(&chain))) ||
             FAILED(chain->GetBuffer(chain->GetCurrentBackBufferIndex(), IID_PPV_ARGS(&picture))))

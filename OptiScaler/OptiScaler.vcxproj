@@ -325,6 +325,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClInclude Include="dlssnr\DlssNr_CompatibilityRuntime.h" />
     <ClInclude Include="dlssnr\DlssNr_GameNr.h" />
     <ClInclude Include="dlssnr\DlssNr_GameNrRuntime.h" />
+    <ClInclude Include="dlssnr\DlssNr_OwnNr.h" />
     <ClInclude Include="dlssnr\DlssNr_RuntimeImports.h" />
     <ClCompile Include="dlssnr\DlssNr_NgxDiagnostics.cpp" />
     <ClInclude Include="dlssnr\DlssNr_NgxDiagnostics.h" />

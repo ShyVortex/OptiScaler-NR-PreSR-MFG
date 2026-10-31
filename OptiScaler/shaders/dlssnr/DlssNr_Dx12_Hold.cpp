@@ -1,5 +1,6 @@
 ﻿#include "pch.h"
 #include "DlssNr_Dx12_State.h"
+#include <dlssnr/DlssNr_OwnNr.h>
 
 auto DlssNr_Dx12::State::SameHoldShape(const D3D12_RESOURCE_DESC& a, const D3D12_RESOURCE_DESC& b) -> bool
 {
@@ -25,8 +26,7 @@ auto DlssNr_Dx12::State::BeginInputHold(ID3D12GraphicsCommandList* cmd, NVSDK_NG
     const unsigned route = (cfg.DlssNrRunBeforeSr.value_or_default() ? 1u : 0u) |
                            (cfg.DlssNrDeferredDlss.value_or_default() ? 2u : 0u) |
                            (cfg.DlssNrFinishedPicture.value_or_default() ? 4u : 0u);
-    const bool requested =
-        cfg.DlssNrEnabled.value_or_default() && cfg.DlssNrHoldFrame.value_or_default() && (route & 3u) != 0;
+    const bool requested = DlssNr::OwnNrEnabled() && cfg.DlssNrHoldFrame.value_or_default() && (route & 3u) != 0;
     if (!requested)
     {
         if (inputHold.active)

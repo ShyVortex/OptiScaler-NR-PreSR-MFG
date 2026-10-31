@@ -86,6 +86,11 @@ namespace DlssNr
 {
 void ClearStatus(void*) {}
 bool Shutdown();
+// The game's own NR features (DlssNr_GameNrRuntime.h); none exist in this fixture.
+namespace GameNr
+{
+void Shutdown() {}
+} // namespace GameNr
 } // namespace DlssNr
 // This is the NR shutdown fixture, not a XeMFG lifetime test. Keep the
 // external Xe cleanup boundary stubbed; it must be reviewed separately.

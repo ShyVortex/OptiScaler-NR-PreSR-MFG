@@ -72,6 +72,8 @@ static constexpr GUID colorSpaceKey = {
 };
 namespace DlssNr
 {
+// Seam for DlssNr_OwnNr.h: no game-owned NR feature in this test.
+inline bool OwnNrEnabled() { return Config::Instance()->DlssNrEnabled.value_or_default(); }
 void ApplyToStreamlinePicture(IDXGISwapChain* swapchain, ID3D12Resource* picture, ID3D12CommandQueue* queue)
 {
     Expect(picture == expectedPicture, "Mixed local and game plugin buffers");

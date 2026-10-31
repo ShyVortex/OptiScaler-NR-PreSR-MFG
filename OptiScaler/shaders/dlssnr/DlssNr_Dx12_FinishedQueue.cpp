@@ -1,6 +1,7 @@
 ﻿#include "pch.h"
 #include "DlssNr_Dx12_State.h"
 #include <dlssnr/DlssNr_StreamlinePicture.h>
+#include <dlssnr/DlssNr_OwnNr.h>
 
 auto DlssNr_Dx12::State::FinishedPictureResetCommandList(ID3D12CommandList* cmd) -> void
 {
@@ -318,8 +319,7 @@ auto DlssNr_Dx12::State::ApplyToFinishedPictureDx11(IDXGISwapChain* swapchain) -
 {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     if (!swapchain || !late.device || !late.producerQueue ||
-        !Config::Instance()->DlssNrFinishedPicture.value_or_default() ||
-        !Config::Instance()->DlssNrEnabled.value_or_default())
+        !Config::Instance()->DlssNrFinishedPicture.value_or_default() || !DlssNr::OwnNrEnabled())
         return;
     const bool heldPicture = Config::Instance()->DlssNrHoldFrame.value_or_default() && inputHold.active &&
                              late.heldValid && late.heldGeneration == inputHold.generation;
