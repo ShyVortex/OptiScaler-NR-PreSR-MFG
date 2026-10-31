@@ -19,6 +19,9 @@
 // 5. Support bits are ignored when the query itself failed.
 // 6. GetFeatureRequirements routes feature 18 through the rule, before the generic driver query, and the setting is
 //    loaded, saved and documented.
+// 7. CreateFeature(18) uses the direct runtime only after the driver produced no feature and the rule unlocks it.
+// 8. Create, evaluate, release and shutdown route the game's NR handles to the direct runtime: by handle pointer,
+//    before id-based routing, and releasing one never touches frame generation.
 
 using namespace DlssNr::GameNr;
 
@@ -115,6 +118,51 @@ int main()
     assert(ReadFile("OptiScaler.ini").find("UnlockGameNR=auto") != std::string::npos);
     std::puts("Test 6 PASS: feature 18 goes through the rule; the setting is loaded, saved and documented");
 
-    std::puts("All game-native NR unlock tests passed (6/6).");
+    // Test 7 - ShouldCreateDirect(onWine, enabled, hasCandidate, driverBlocked, createResult, gotHandle)
+    static_assert(ShouldCreateDirect(true, true, true, false, OutOfDate, false));
+    static_assert(ShouldCreateDirect(false, true, true, false, FeatureNotSupported, false));
+    static_assert(!ShouldCreateDirect(false, true, true, false, OutOfDate, false), "Windows OutOfDate stays refused");
+    static_assert(!ShouldCreateDirect(false, true, true, true, FeatureNotSupported, false), "below the 610.88 gate");
+    static_assert(!ShouldCreateDirect(true, true, true, false, Success, true), "the driver created it");
+    static_assert(!ShouldCreateDirect(true, true, true, false, OutOfDate, true), "a handle came back");
+    static_assert(!ShouldCreateDirect(true, false, true, false, OutOfDate, false), "setting off");
+    static_assert(!ShouldCreateDirect(true, true, false, false, OutOfDate, false), "no nvngx_dlssnr.dll");
+    std::puts("Test 7 PASS: the direct runtime is used only after a refused create the rule unlocks");
+
+    // Test 8
+    assert(ngx.find("#include<dlssnr/DlssNr_GameNrRuntime.h>") != std::string::npos);
+    const auto failed = ngx.find("LOG_INFO(\"NativeCreateFeaturefailed:0x{:X}\",(uint32_t)res);");
+    const auto direct = ngx.find("returnDlssNr::GameNr::CreateDirect(InCmdList,effectiveParameters,OutHandle);");
+    assert(failed != std::string::npos && direct != std::string::npos && failed < direct);
+    assert(ngx.find("DlssNr::GameNr::ShouldCreateDirect(state.isRunningOnLinux,cfg.DlssNrUnlockGameNr."
+                    "value_or_default(),") != std::string::npos);
+
+    const auto releaseAt = ngx.find("NVSDK_NGX_APINVSDK_NGX_ResultNVSDK_NGX_D3D12_ReleaseFeature(");
+    const auto releaseRoute = ngx.find("if(DlssNr::GameNr::Owns(InHandle))returnDlssNr::GameNr::Release(InHandle);");
+    const auto fgCleanup = ngx.find("//Cleanupframegen", releaseAt);
+    assert(releaseAt < releaseRoute && releaseRoute < fgCleanup && "game NR release never reaches the FG cleanup");
+
+    const auto evaluateAt = ngx.find("NVSDK_NGX_APINVSDK_NGX_ResultNVSDK_NGX_D3D12_EvaluateFeature(");
+    const auto evaluateRoute = ngx.find("if(DlssNr::GameNr::Owns(InFeatureHandle))returnDlssNr::GameNr::Evaluate("
+                                        "InCmdList,InFeatureHandle,InParameters);");
+    const auto idLookup = ngx.find("HandleToFeature.Read(handleId)", evaluateAt);
+    assert(evaluateAt < evaluateRoute && evaluateRoute < idLookup && "game NR evaluate precedes id-based routing");
+
+    const auto shutdownAt = ngx.find("staticNVSDK_NGX_ResultShutdownDx12(");
+    const auto gameShutdown = ngx.find("DlssNr::GameNr::Shutdown();", shutdownAt);
+    const auto contextsCleared = ngx.find("Dx12Contexts.clear();", shutdownAt);
+    assert(gameShutdown != std::string::npos && gameShutdown < contextsCleared);
+
+    const auto runtime = Squash(ReadFile("OptiScaler/dlssnr/DlssNr_GameNrRuntime.cpp"));
+    assert(runtime.find("std::unordered_map<constNVSDK_NGX_Handle*,std::shared_ptr<CompatibilityRuntime>>live;") !=
+               std::string::npos &&
+           "handles are keyed by pointer");
+    assert(runtime.find("autoruntime=CompatibilityRuntime::TryOpen(device);") != std::string::npos);
+    const auto releaseBody = runtime.substr(runtime.find("NVSDK_NGX_ResultRelease(NVSDK_NGX_Handle*handle)"));
+    assert(releaseBody.find("RetainLocked(runtime);") < releaseBody.find("runtime->Release(handle)") &&
+           "a released feature's runtime stays loaded until NGX shutdown");
+    std::puts("Test 8 PASS: the game's NR handles are routed to the direct runtime ahead of id-based paths");
+
+    std::puts("All game-native NR unlock tests passed (8/8).");
     return 0;
 }

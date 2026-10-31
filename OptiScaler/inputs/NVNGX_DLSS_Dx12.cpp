@@ -33,6 +33,7 @@
 #include <ankerl/unordered_dense.h>
 #include <misc/IdentifyGpu.h>
 #include <dlssnr/DlssNr_GameNr.h>
+#include <dlssnr/DlssNr_GameNrRuntime.h>
 #include <dlssnr/DlssNr_CompatibilityRuntime.h>
 
 static ankerl::unordered_dense::map<unsigned int, ContextData<IFeature_Dx12>> Dx12Contexts;
@@ -482,6 +483,7 @@ static NVSDK_NGX_Result ShutdownDx12(ID3D12Device* requestedDevice)
     for (auto& [id, entry] : Dx12Contexts)
         if (entry.feature)
             entry.feature->RetireNeuralRendering();
+    DlssNr::GameNr::Shutdown();
     if (!DlssNr::Shutdown())
         return NVSDK_NGX_Result_Fail;
 
@@ -919,6 +921,17 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_CreateFeature(ID3D12GraphicsComma
             else
             {
                 LOG_INFO("Native CreateFeature failed: 0x{:X}", (uint32_t) res);
+
+                // A game's own NR option: the driver refused this GPU, so use the direct runtime where allowed.
+                if (InFeatureID == (NVSDK_NGX_Feature) DlssNr::GameNr::FeatureId &&
+                    DlssNr::GameNr::ShouldCreateDirect(
+                        state.isRunningOnLinux, cfg.DlssNrUnlockGameNr.value_or_default(),
+                        !DlssNr::CompatibilityRuntime::CandidatePaths().empty(), DlssNr::DriverGate::Blocked(),
+                        (unsigned int) res, *OutHandle != nullptr))
+                {
+                    *OutHandle = nullptr;
+                    return DlssNr::GameNr::CreateDirect(InCmdList, effectiveParameters, OutHandle);
+                }
             }
 
             return res;
@@ -945,6 +958,11 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_ReleaseFeature(NVSDK_NGX_Handle* 
 
     if (!InHandle)
         return NVSDK_NGX_Result_Success;
+
+    // The game's own NR features belong to the direct runtime; their ids may collide with driver handles, and
+    // releasing one must not touch frame generation.
+    if (DlssNr::GameNr::Owns(InHandle))
+        return DlssNr::GameNr::Release(InHandle);
 
     auto handleId = InHandle->Id;
 
@@ -1281,6 +1299,10 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
         LOG_ERROR("InCmdList is null");
         return NVSDK_NGX_Result_Fail;
     }
+
+    // The game's own NR features run on the direct runtime, before any id-based routing.
+    if (DlssNr::GameNr::Owns(InFeatureHandle))
+        return DlssNr::GameNr::Evaluate(InCmdList, InFeatureHandle, InParameters);
 
     const uint32_t handleId = InFeatureHandle->Id;
     LOG_DEBUG("EvaluateFeature - Handle: {}, CmdList: {:p}", handleId, (void*) InCmdList);

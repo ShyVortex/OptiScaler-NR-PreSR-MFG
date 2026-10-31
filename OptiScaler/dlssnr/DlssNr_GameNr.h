@@ -45,5 +45,16 @@ constexpr Decision Decide(bool onWine, bool enabled, bool hasCandidate, bool dri
     return Decision::Unlock;
 }
 
+constexpr bool Failed(unsigned int result) { return (result & 0xFFF00000u) == 0xBAD00000u; }
+
+// After the driver's CreateFeature(18): create through the direct runtime only when the driver produced no feature
+// and the same rule unlocks it. A Windows FAIL_OutOfDate therefore always reaches the game unchanged.
+constexpr bool ShouldCreateDirect(bool onWine, bool enabled, bool hasCandidate, bool driverBlocked,
+                                  unsigned int createResult, bool gotHandle)
+{
+    return !gotHandle && Failed(createResult) &&
+           Decide(onWine, enabled, hasCandidate, driverBlocked, createResult, 0) == Decision::Unlock;
+}
+
 inline const char* DecisionName(Decision decision) { return decision == Decision::Unlock ? "unlock" : "pass through"; }
 } // namespace DlssNr::GameNr
