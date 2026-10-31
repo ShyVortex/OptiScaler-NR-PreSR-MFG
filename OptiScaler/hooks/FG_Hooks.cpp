@@ -17,6 +17,7 @@
 
 #include <misc/IdentifyGpu.h>
 #include <hooks/Reflex_Hooks.h>
+#include <hooks/FgGpuTimeSource.h>
 #include <menu/menu_overlay_dx.h>
 
 #include <d3d12.h>
@@ -1161,7 +1162,21 @@ HRESULT FGHooks::FGPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags,
         {
             std::optional<double> upscalerTimeOpt {};
 
-            if (state.swapchainInteropApi == SwapchainInteropApi::Dx11wDx12 && state.currentD3D11Device != nullptr)
+            // The argument must match the feature, not the swapchain: a native D3D12 feature on a Dx11wDx12
+            // swapchain (Metro Redux) needs the D3D12 queue.
+            namespace gts = FgGpuTimeSource;
+            const auto interop = state.swapchainInteropApi == SwapchainInteropApi::Dx11wDx12 ? gts::Interop::Dx11wDx12
+                                 : state.swapchainInteropApi == SwapchainInteropApi::None    ? gts::Interop::None
+                                                                                             : gts::Interop::Other;
+            const auto api = currentFeature->Api();
+            const auto kind = api == API::DX11               ? gts::FeatureKind::Dx11
+                              : api != API::DX12             ? gts::FeatureKind::Other
+                              : currentFeature->IsWithDx12() ? gts::FeatureKind::Dx12Wrapper
+                                                             : gts::FeatureKind::Dx12Native;
+            const auto source =
+                gts::Resolve(interop, kind, state.currentD3D11Device != nullptr, state.currentCommandQueue != nullptr);
+
+            if (source == gts::Source::D3D11Context)
             {
                 ID3D11DeviceContext* context = nullptr;
                 state.currentD3D11Device->GetImmediateContext(&context);
@@ -1171,7 +1186,7 @@ HRESULT FGHooks::FGPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags,
 
                 context->Release();
             }
-            else if (state.swapchainInteropApi == SwapchainInteropApi::None && state.currentCommandQueue != nullptr)
+            else if (source == gts::Source::D3D12Queue)
             {
                 if (upscalerTimeOpt = currentFeature->ReadUpscalerTime(state.currentCommandQueue);
                     upscalerTimeOpt.has_value())

@@ -575,6 +575,9 @@
     <ClInclude Include="wrapped\wrapped_factory.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="hooks\FgGpuTimeSource.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="hooks\FG_Hooks.h">
       <Filter>Header Files</Filter>
     </ClInclude>
