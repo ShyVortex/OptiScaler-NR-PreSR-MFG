@@ -76,12 +76,13 @@ DLSS-NR: feature created at 1512x848 through direct compatibility runtime
   - Every other failure still falls back.
   - The status reason becomes "the NVIDIA driver does not support Neural Rendering; update to 610.88 or newer
     (616.64+ recommended)".
-  - This covers the cases the version gate exempts: Wine and unknown versions.
+  - As first committed this also covered Wine. That was wrong and broke NR on Linux; since `6a7ad0ec` the refusal
+    applies on Windows only, including unknown versions. See section 8.
 - `OptiScaler.ini` documents the requirement under `[DlssNr] Enabled`. `NR-RESTRICTION-AUDIT.md` lists the
   OutOfDate exclusion as retained.
 
 ## 7. Verification
-- `tests/nr_driver_gate_unit.cpp` (13/13 PASS) covers:
+- `tests/nr_driver_gate_unit.cpp` (13/13 PASS at the time; 14/14 since `6a7ad0ec`) covers:
   - the 61087/61088 boundaries, with 616.64 allowed;
   - Wine exempt and unknown allowed;
   - the messages;
@@ -104,3 +105,35 @@ DLSS-NR: feature created at 1512x848 through direct compatibility runtime
   - In game:
     - NR still enables on a driver ≥ 610.88;
     - the #60 reporter (576.88) sees the disabled checkbox and message, with no hang.
+
+## 8. Follow-up: Linux Regression in v0.9.80–v0.9.81 (`6a7ad0ec`)
+- **Found by**: the maintainer on 2026-10-31, in Metro 2033 Redux under Proton (`Running on Wine 11.0`), with
+  OptiScaler v0.9.81-final (`5a799ec7`).
+- **Environment**: CachyOS, kernel 7.3.1-1-cachyos, NVIDIA GeForce RTX 3080 Ti Laptop GPU, driver 580.196.07.
+- **Symptom**: OptiScaler's own Neural Rendering never runs. The status reads "the NVIDIA driver does not support
+  Neural Rendering; update to 610.88 or newer (616.64+ recommended)", and the log shows:
+  ```
+  DLSS-NR (driver): the NVIDIA driver does not support Neural Rendering; ...; not trying the direct runtime
+  DLSS-NR driver creation for pass 1 failed: 0xBAD0000C (FAIL_OutOfDate)
+  ```
+- **Cause**:
+  - The Linux driver's NGX has no Neural Rendering feature and answers `FAIL_OutOfDate` to feature 18 every time.
+    The game's own query in the same session gets the same answer (`nvngx.log`: "required feature is not
+    supported by NGX runtime, please update display driver").
+  - Under Wine the direct compatibility runtime (`DlssNr::CompatibilityRuntime`, loading `nvngx_dlssnr.dll` itself)
+    is therefore the only NR path. `dec66857` refused it after `FAIL_OutOfDate` on every platform.
+  - The hang it prevents was on a Windows driver (576.88), and the version gate already exempted Wine.
+- **Fix** (`6a7ad0ec`):
+  - `DriverGate::RefusesDirectRuntime(result, onWine)` is true only for `FAIL_OutOfDate` off Wine.
+  - The NR proxy and the "update to 610.88" status in `DlssNr_Dx12_Models.cpp` both decide through it, with
+    `State::isRunningOnLinux`.
+  - On Windows nothing changes: `FAIL_OutOfDate` never reaches the direct runtime. On Wine it falls back as it did
+    before v0.9.80.
+- **Verification**:
+  - Test 14 in `tests/nr_driver_gate_unit.cpp`: the truth table (Windows refuses, Wine falls back, other failures
+    and success are never refused), and source checks that both sites decide only through the helper.
+  - `nr_halo_dx12` and `nr_motion_scale` still pass. clang-format 23 clean; UTF-8 BOM present.
+  - **Pending**: an MSVC build, then NR on Linux in game (expected: `NR compatibility: candidate ...
+    CreateFeature(18) result=0x00000001`).
+- **Not addressed here**: the game's own NR option (Metro Redux) stays hidden, because NGX reports feature 18 as
+  unsupported to the game. Exposing it would be a separate change.
