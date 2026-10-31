@@ -341,6 +341,11 @@ static const QuirkEntry quirkTable[] = {
     QUIRK_ENTRY("metroexodus.exe", GameQuirk::DisableDxgiSpoofing, GameQuirk::ForceBorderlessWhenUsingXeFG,
                 GameQuirk::ForceAutoExposure, GameQuirk::DisableHudfix),
 
+    // Metro 2033 Redux / Metro Last Light Redux
+    // ForceBorderless required for XeFG interpolation: the game creates an exclusive-fullscreen swapchain and Intel
+    // XeSS-FG disables interpolation in exclusive fullscreen (FG-DX11WDX12-NATIVE-DX12-GPUTIME-CRASH.md)
+    QUIRK_ENTRY("metro.exe", GameQuirk::ForceBorderlessWhenUsingXeFG),
+
     // Helldivers 2
     // ForceBorderless required for XeFG / XeMFG-SR interpolation (Intel XeSS-FG disables interpolation in exclusive
     // fullscreen)

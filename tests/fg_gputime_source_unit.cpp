@@ -20,6 +20,8 @@
 // 5. FGPresent decides through the helper.
 // 6. LocalPresent decides through the helper, reads once per present, and no longer has the unconditional
 //    Dx11wDx12 D3D11-context read.
+// 7. Metro Redux (metro.exe) forces borderless with XeFG only: it uses exclusive fullscreen, where XeSS-FG does not
+//    interpolate (confirmed in game with [XeMFG] ForceBorderless=true).
 
 using namespace FgGpuTimeSource;
 
@@ -103,6 +105,12 @@ int main()
            "the unconditional Dx11wDx12 context read is gone");
     std::puts("Test 6 PASS: LocalPresent reads once, with the object the feature expects");
 
-    std::puts("All FG GPU-time source tests passed (6/6).");
+    // Test 7
+    const auto quirks = Squash(ReadFile("OptiScaler/misc/Quirks.h"));
+    assert(quirks.find("QUIRK_ENTRY(\"metro.exe\",GameQuirk::ForceBorderlessWhenUsingXeFG),") != std::string::npos &&
+           "metro.exe carries only the borderless-with-XeFG quirk");
+    std::puts("Test 7 PASS: Metro Redux forces borderless only when XeFG is used");
+
+    std::puts("All FG GPU-time source tests passed (7/7).");
     return 0;
 }

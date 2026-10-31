@@ -90,10 +90,15 @@ the Neural Rendering work: NR wasn't created in the crashing runs.
   be enabled", because the game creates an exclusive-fullscreen swapchain.
 - With `[XeMFG] ForceBorderless=true` XeFG interpolates. The maintainer confirmed this in game on `b4dbb44`.
 - Metro Exodus Enhanced Edition, on a newer version of the same engine, already has the
-  `ForceBorderlessWhenUsingXeFG` quirk. A matching `metro.exe` quirk is a follow-up task.
+  `ForceBorderlessWhenUsingXeFG` quirk.
+- `misc/Quirks.h` now has `QUIRK_ENTRY("metro.exe", GameQuirk::ForceBorderlessWhenUsingXeFG)`.
+  - It sets a volatile `FGXeFGForceBorderless=true` only when XeFG is the FG output, and never when the user has set
+    `[XeMFG] ForceBorderless` themselves.
+  - Metro Last Light Redux is expected to share `metro.exe`, so it gets the same quirk. That is unverified there.
+- Test 7 in `tests/fg_gputime_source_unit.cpp` checks the entry.
 
 ## 7. Test Verification
-- `tests/fg_gputime_source_unit.cpp` (6/6 PASS):
+- `tests/fg_gputime_source_unit.cpp` (7/7 PASS; test 7 is the quirk, see section 6):
   1. Native D3D12 features only get the queue.
   2. D3D11 features only get the context.
   3. The wrappers read with whatever is available.
