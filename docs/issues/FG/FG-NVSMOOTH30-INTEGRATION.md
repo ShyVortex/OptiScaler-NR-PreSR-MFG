@@ -159,3 +159,72 @@ This guarantees that extended Windows interfaces (`IDXGISwapChainMedia`) and pro
 - All unit tests compiled and passed cleanly via `g++ -std=c++20`.
 - Clang-format check passed cleanly with zero violations (`clang-format --dry-run --Werror`).
 - UTF-8 BOM (`\xef\xbb\xbf`) preserved across all modified C++ source and header files.
+
+---
+
+## 6. Follow-up (2026-11-02): v0.9.31 Log Analysis & Attachment Detection
+
+### 6.1 Environment
+- **Reporters** ([DLSS Unlocked #42](https://github.com/ShyVortex/DLSS-Unlocked/issues/42)):
+  - johnCXVII: Windows 11, RTX 3060 12 GB (Ampere), driver 616.92, OptiScaler v0.9.31, NVSmooth30 0.1.0. Control
+    Resonant and Cyberpunk 2077 (both D3D12, both Streamline), Forza Horizon 6.
+  - AreChen: the same symptoms in Final Fantasy VII Remake (D3D11), v0.9.31.
+  - kilyan82: v0.9.85, no crash, the amber "Pending Restart" text stays and Smooth Motion "doesn't work". No logs yet.
+- **Analysis machine:** CachyOS, kernel 7.3.1-1-cachyos, NVIDIA GeForce RTX 3080 Ti Laptop GPU, driver 580.196.07.
+  NVSmooth30 is Windows-only, so nothing here could be reproduced locally.
+- **NVSmooth30 source:** the local copy of v0.1.0 (`nvsmooth30/`, gitignored), still the latest upstream
+  (`ItsAdeline/NVSmooth30`, last commit 2026-09-20).
+
+### 6.2 What the v0.9.31 logs show
+- **The driver's Smooth Motion starts.** With OptiScaler blocking the 16×16 dummy swapchain, NvPresent still loaded
+  its Smooth Motion CUDA kernels and NVSmooth30 retargeted every one (`[nvs30] CUDA fatbin #1..#19 ... sm89->86=1
+  rc=0` in Control, `#1..#4` in Cyberpunk). Blocking NVSmooth30's Present hooks does not stop NvPresent attaching.
+- **The first present then fails.** Cyberpunk's `OptiScaler.log` ends at `LocalPresent Original present result:
+  80004002` (`E_NOINTERFACE`) right after the swapchain was created. Control logs a Streamline exception and minidump
+  during present. The §4.3 `QueryInterface` delegation did not resolve this. **Still open**, pending v0.9.85 logs.
+  - One unconfirmed hypothesis: Streamline logs `Detected base interface 'ID3D12CommandQueue' while expecting SL
+    proxy` just before swapchain creation, so NvPresent may be querying a queue it doesn't expect.
+- **OptiScaler's attachment check was wrong.** Both logs say `NVSmooth30: Swapchain attachment verified = false`
+  although the kernels had loaded (see 6.4).
+
+### 6.3 Corrections to sections 3 and 4
+- **`SM86_SKIP_DXGI_HOOKS` does nothing.** NVSmooth30 v0.1.0 reads only `SM86_ENABLE_OSD`,
+  `SM86_ENABLE_D3D11_BRIDGE`, `SM86_FORCE_VSYNC`, `SM86_DIAGNOSTICS`, `SM86_LOW_LATENCY`, `SM86_HALF_REFRESH_CAP`,
+  `SM86_BASE_FPS_CAP`, `SM86_BRIDGE_LINEARIZE` and `SM86_NVPRESENT_PATH` (`src/config.cpp`). Only the dummy-window
+  block in `DxgiFactory_Hooks.cpp` (§4.5) keeps its Present hooks out.
+- **DX11 games most likely get no Smooth Motion.** NVSmooth30's route for D3D11 is its D3D11-to-D3D12 bridge, which
+  runs inside its Present hooks. OptiScaler forces `SM86_ENABLE_D3D11_BRIDGE=0` and blocks those hooks.
+- **What the Present hooks do:** the bridge, frame pacing (off by default), the OSD and NVSmooth30's own activation
+  log line. NvPresent's own attachment does not depend on them.
+- **The log lines `dummy D3D11 swapchain creation failed: 0x887A0001` and `DXGI Present hooks failed (slots 8 and
+  22)`** are expected: `0x887A0001` is the `DXGI_ERROR_INVALID_CALL` OptiScaler returns for the dummy window.
+
+### 6.4 Attachment detection fix (`3b91e98d`)
+- **The defect** (§4.6's check):
+  - it ran once, in the `WrappedIDXGISwapChain4` constructor, before the first present; NVSmooth30's source expects
+    NvPresent to attach lazily during the first presents;
+  - it checked vtable slots 0/8/22 and offset `+0x18` only, and read `+0x18` without validation;
+  - a `true` from one swapchain could never be cleared by a later one;
+  - the menu called every miss "Pending Restart".
+- **The fix:**
+  - `OptiScaler/framegen/smoothmotion/NvPresentAttach.h`: a pure probe in NVSmooth30's order (slots 0/7/8/22, the
+    wrapper at `+0x18`, then `0x8..0x80`), every read range-checked (`VirtualQuery` in the real predicate), never
+    calling into a candidate.
+  - `WrappedIDXGISwapChain4::ProbeNvPresent()` runs after `Present` / `Present1`: every present up to 120, then every
+    120th up to 3600. It logs once per swapchain: `NVSmooth30: NvPresent attached to swapchain N (offset 0x.., present
+    M)`, or `NvPresent not detected on swapchain N after 3600 presents (...)`.
+  - `NVSmooth30Loader::BeginSwapchain` / `SetSwapchainAttached(id)` / `SetProbeDone(id)`: state per swapchain; a
+    stale swapchain is ignored.
+  - Menu: green when attached; "Pending Restart" only when `nvsmooth30.dll` was loaded after the swapchain; "Checking"
+    during the probe window; then an amber "Not detected", with a help marker saying the detection is heuristic and
+    how to verify (external FPS overlay) and report (`OptiScaler.log` + `nvsmooth30.log`).
+- **Not changed:** loading, the dummy-window block, environment variables, hooks and presentation.
+
+### 6.5 Test verification
+- `tests/nvsmooth30_attach_probe_unit.cpp` (7/7 PASS): the probe on synthetic objects (self vtable, wrapper at
+  `+0x18` / other offsets / past `0x80`, self-pointers, unreadable memory), the probe schedule, no constructor probe,
+  per-swapchain state, and the menu wording.
+- `tests/nvsmooth30_loader_unit.cpp` and `tests/ampere_smooth_motion_unit.cpp`: mock wording updated, PASS.
+- clang-format 23 clean; UTF-8 BOM present.
+- **Not yet checked in game:** a Windows RTX 30 reporter needs to confirm the log line and menu against an external
+  FPS overlay.
