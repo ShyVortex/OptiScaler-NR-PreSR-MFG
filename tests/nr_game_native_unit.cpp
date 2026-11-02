@@ -30,6 +30,8 @@
 //     the NR hotkey cannot turn it back on, so OptiScaler's NR never resumes on its own.
 // 12. "Preload NR" (default off) loads the direct runtime at the game's NGX D3D12 init after the driver init
 //     succeeded, never on a Windows driver below the 610.88 gate, and keeps it until NGX shutdown.
+// 13. After a successful create, the game's NR model settings are logged read-only, naming the model the preset hint
+//     selects (unset/0/2 -> Optimized, 1 -> Original).
 
 using namespace DlssNr::GameNr;
 
@@ -263,6 +265,18 @@ int main()
            "the preloaded runtime is kept until NGX shutdown");
     std::puts("Test 12 PASS: Preload NR loads the runtime at NGX init only when allowed and keeps it");
 
-    std::puts("All game-native NR unlock tests passed (12/12).");
+    // Test 13
+    assert(ModelName(std::nullopt) == "Optimized (Small FP8)");
+    assert(ModelName(0u) == "Optimized (Small FP8)");
+    assert(ModelName(2u) == "Optimized (Small FP8)");
+    assert(ModelName(1u) == "Original (Honest Tench)");
+    assert(ModelName(7u) == "unknown preset 7");
+    const auto logCall = create.find("LogGameSettings(params);");
+    assert(logCall != std::string::npos && failReturn < logCall && "logged only after a successful create");
+    assert(runtime.find("Read<unsignedint>(params,\"DLSSNR.Hint.Render.Preset\")") != std::string::npos);
+    assert(runtime.find("params->Set(") == std::string::npos && "the game's parameters are only read");
+    std::puts("Test 13 PASS: the game's NR settings are logged read-only with the selected model");
+
+    std::puts("All game-native NR unlock tests passed (13/13).");
     return 0;
 }

@@ -2,6 +2,9 @@
 
 #include "DlssNr_DriverGate.h"
 
+#include <optional>
+#include <string>
+
 // A game's own DLSS Neural Rendering option (NGX feature 18, e.g. Metro 2033 Redux) stays hidden when the driver
 // reports NR unsupported. The fork's direct runtime (nvngx_dlssnr.dll) runs NR on GPUs NVIDIA does not support, so
 // the option is unlocked on Windows and Linux alike, with one exception: on Windows a driver without NR support
@@ -60,6 +63,17 @@ constexpr bool ShouldCreateDirect(bool onWine, bool enabled, bool hasCandidate, 
 constexpr bool ShouldPreload(bool enabled, bool hasCandidate, bool driverBlocked)
 {
     return enabled && hasCandidate && !driverBlocked;
+}
+
+// The weights nvngx_dlssnr.dll 310.9 picks from DLSSNR.Hint.Render.Preset (NR-LIGHTWEIGHT-MODEL-PRESET-SUPPORT.md):
+// 0 or unset fall back to the lightweight model.
+inline std::string ModelName(std::optional<unsigned int> preset)
+{
+    if (!preset || *preset == 0 || *preset == 2)
+        return "Optimized (Small FP8)";
+    if (*preset == 1)
+        return "Original (Honest Tench)";
+    return "unknown preset " + std::to_string(*preset);
 }
 
 inline const char* DecisionName(Decision decision) { return decision == Decision::Unlock ? "unlock" : "pass through"; }

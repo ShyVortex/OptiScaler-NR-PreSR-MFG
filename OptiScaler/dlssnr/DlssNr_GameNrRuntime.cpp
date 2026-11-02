@@ -1,6 +1,7 @@
 ﻿#include "pch.h"
 #include "DlssNr_GameNrRuntime.h"
 #include "DlssNr_CompatibilityRuntime.h"
+#include "DlssNr_GameNr.h"
 
 #include <Config.h>
 #include <Logger.h>
@@ -8,6 +9,9 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <format>
+#include <optional>
+#include <string>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -24,6 +28,31 @@ std::atomic<size_t> liveCount { 0 };
 // A runtime stays loaded until NGX shuts down: toggling NR in the game must not re-initialise it on the device, and
 // work recorded by the game's last create or evaluate may still be executing.
 std::vector<std::shared_ptr<CompatibilityRuntime>> retained;
+
+template <class T> std::optional<T> Read(const NVSDK_NGX_Parameter* params, const char* key)
+{
+    T value {};
+    if (params && params->Get(key, &value) == NVSDK_NGX_Result_Success)
+        return value;
+    return std::nullopt;
+}
+
+std::string Text(std::optional<unsigned int> value) { return value ? std::to_string(*value) : "unset"; }
+std::string Text(std::optional<float> value) { return value ? std::format("{:.2f}", *value) : "unset"; }
+
+// What the game asked its own NR for; read-only, so "unset" can be told apart from 0.
+void LogGameSettings(const NVSDK_NGX_Parameter* params)
+{
+    const auto preset = Read<unsigned int>(params, "DLSSNR.Hint.Render.Preset");
+    LOG_INFO("DLSS-NR (game): model settings: Preset={} -> {}, Style={}, Intensity={}, LocalStructure={}, "
+             "LocalTone={}, SkinStructure={}, AutoMask={}, Size={}x{}",
+             Text(preset), ModelName(preset), Text(Read<unsigned int>(params, "DLSSNR.Style")),
+             Text(Read<float>(params, "DLSSNR.Intensity")), Text(Read<float>(params, "DLSSNR.LocalStructureStrength")),
+             Text(Read<float>(params, "DLSSNR.LocalToneStrength")),
+             Text(Read<float>(params, "DLSSNR.SkinStructureStrength")),
+             Text(Read<unsigned int>(params, "DLSSNR.UseAutoMask")), Text(Read<unsigned int>(params, "DLSSNR.Width")),
+             Text(Read<unsigned int>(params, "DLSSNR.Height")));
+}
 
 void RetainLocked(const std::shared_ptr<CompatibilityRuntime>& runtime)
 {
@@ -59,6 +88,8 @@ NVSDK_NGX_Result CreateDirect(ID3D12GraphicsCommandList* commands, NVSDK_NGX_Par
     RetainLocked(runtime);
     if (result != NVSDK_NGX_Result_Success || *handle == nullptr)
         return result == NVSDK_NGX_Result_Success ? NVSDK_NGX_Result_Fail : result;
+
+    LogGameSettings(params);
 
     live[*handle] = std::move(runtime);
     liveCount.store(live.size(), std::memory_order_release);
