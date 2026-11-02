@@ -141,10 +141,13 @@ int main()
 
     // Test 9
     const auto toggle = Between(menu, "const bool driverBlocked = DriverGate::Blocked();", "Apply model");
-    assert(toggle.find("ImGui::TextWrapped(\"%s\", driverMessage.c_str());") != std::string::npos &&
+    assert(toggle.find("ImGui::TextWrapped(\"%s\", driverBlocked ? driverMessage.c_str() : GameNrActiveMessage);") !=
+               std::string::npos &&
            "the reason is shown in the menu");
-    const auto disabled = toggle.find("ImGui::BeginDisabled(driverBlocked);");
-    const auto checkbox = toggle.find("\"Enable Neural Rendering\", &enabled, toggleWidth) && !driverBlocked)");
+    // The lock also covers a game running its own NR (nr_game_native_unit test 11); the driver gate must stay in it.
+    assert(toggle.find("const bool enableLocked = driverBlocked || gameNr;") != std::string::npos);
+    const auto disabled = toggle.find("ImGui::BeginDisabled(enableLocked);");
+    const auto checkbox = toggle.find("\"Enable Neural Rendering\", &enabled, toggleWidth) && !enableLocked)");
     const auto write = toggle.find("config->DlssNrEnabled = enabled;");
     assert(disabled != std::string::npos && checkbox != std::string::npos && write != std::string::npos);
     assert(disabled < checkbox && checkbox < write);

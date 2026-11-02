@@ -2,6 +2,7 @@
 #include "DlssNr_GameNrRuntime.h"
 #include "DlssNr_CompatibilityRuntime.h"
 
+#include <Config.h>
 #include <Logger.h>
 #include <d3d12.h>
 #include <algorithm>
@@ -60,6 +61,12 @@ NVSDK_NGX_Result CreateDirect(ID3D12GraphicsCommandList* commands, NVSDK_NGX_Par
 
     live[*handle] = std::move(runtime);
     liveCount.store(live.size(), std::memory_order_release);
+
+    // The game's NR wins: OptiScaler's own NR is turned off for this session and stays off when the game releases
+    // its feature, until the user ticks it again. Volatile, so the saved setting is never rewritten.
+    if (Config::Instance()->DlssNrEnabled.value_or_default())
+        LOG_INFO("DLSS-NR (game): the game runs its own NR; turning OptiScaler's NR off for this session");
+    Config::Instance()->DlssNrEnabled.set_volatile_value(false);
     return result;
 }
 

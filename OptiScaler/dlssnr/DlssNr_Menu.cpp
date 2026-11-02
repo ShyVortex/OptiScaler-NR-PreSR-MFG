@@ -60,10 +60,6 @@ static void RenderStatus(Config* config)
     {
         ImGui::TextDisabled("NR off.");
     }
-    else if (GameNr::Active())
-    {
-        ImGui::TextWrapped("%s", GameNrPausedMessage);
-    }
     else if (!dx12.running && !vulkan)
     {
         const auto feature = State::Instance().currentFeature;
@@ -169,17 +165,20 @@ void RenderMenu(Config* config, float menuResScale)
         const bool driverBlocked = DriverGate::Blocked();
         const std::string driverMessage =
             driverBlocked ? DriverGate::BlockedMessage(DriverGate::DetectedVersion()) : std::string {};
-        if (driverBlocked)
+        // While the game runs its own NR (feature 18), OptiScaler's NR is held off (DlssNr_GameNrRuntime.cpp).
+        const bool gameNr = GameNr::Active();
+        if (driverBlocked || gameNr)
         {
             const auto textColor = ImGui::GetStyleColorVec4(ImGuiCol_Text);
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(textColor.x, textColor.y * 0.8f, 0.0f, textColor.w));
-            ImGui::TextWrapped("%s", driverMessage.c_str());
+            ImGui::TextWrapped("%s", driverBlocked ? driverMessage.c_str() : GameNrActiveMessage);
             ImGui::PopStyleColor();
         }
 
+        const bool enableLocked = driverBlocked || gameNr;
         bool enabled = config->DlssNrEnabled.value_or_default();
-        ImGui::BeginDisabled(driverBlocked);
-        if (PipelineUi::CheckboxWrapped("Enable Neural Rendering", &enabled, toggleWidth) && !driverBlocked)
+        ImGui::BeginDisabled(enableLocked);
+        if (PipelineUi::CheckboxWrapped("Enable Neural Rendering", &enabled, toggleWidth) && !enableLocked)
         {
             config->DlssNrEnabled = enabled;
             RequestHistoryReset();
@@ -188,7 +187,9 @@ void RenderMenu(Config* config, float menuResScale)
         }
         ImGui::EndDisabled();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            ImGui::SetTooltip("%s", driverBlocked ? driverMessage.c_str() : "Enable NR processing.");
+            ImGui::SetTooltip("%s", driverBlocked ? driverMessage.c_str()
+                                    : gameNr      ? GameNrActiveMessage
+                                                  : "Enable NR processing.");
 
         bool applyModel = config->DlssNrApplyModel.value_or_default();
         if (PipelineUi::CheckboxWrapped("Apply model", &applyModel, toggleWidth))

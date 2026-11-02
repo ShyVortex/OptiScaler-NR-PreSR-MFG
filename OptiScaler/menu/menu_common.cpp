@@ -16,6 +16,7 @@
 
 #include <dlssnr/DlssNr.h>
 #include <dlssnr/DlssNr_DriverGate.h>
+#include <dlssnr/DlssNr_OwnNr.h>
 
 #include "input/input_system.h"
 
@@ -1526,6 +1527,16 @@ void MenuCommon::HandleMenuShortcuts(RenderMenuContext& ctx)
             ImGuiToast toast { ImGuiToastType::Warning, 5000 };
             toast.setTitle("DLSS Neural Rendering");
             toast.setContent("%s", message.c_str());
+            ImGui::InsertNotification(toast);
+        }
+
+        if (inputDlssNr && DlssNr::GameNr::Active())
+        {
+            // The game runs its own NR; OptiScaler's stays off until the game turns its NR off.
+            inputDlssNr = false;
+            ImGuiToast toast { ImGuiToastType::Warning, 5000 };
+            toast.setTitle("DLSS Neural Rendering");
+            toast.setContent("%s", DlssNr::GameNrActiveMessage);
             ImGui::InsertNotification(toast);
         }
 

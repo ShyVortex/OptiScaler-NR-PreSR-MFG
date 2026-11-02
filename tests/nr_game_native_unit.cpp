@@ -23,8 +23,11 @@
 // 8. Create, evaluate, release and shutdown route the game's NR handles to the direct runtime: by handle pointer,
 //    before id-based routing, and releasing one never touches frame generation.
 // 9. The game's NR wins: OptiScaler's own NR on DX12 runs only through DlssNr::OwnNrEnabled() (enabled and no live
-//    game NR feature), the gate reads a lock-free counter, and the NR menu says why it is paused.
+//    game NR feature) and the gate reads a lock-free counter.
 // 10. The Windows-only harnesses that compile production slices provide the new seams.
+// 11. When the game's NR feature is created, OptiScaler's NR is turned off for the session (volatile, the saved
+//     setting kept); while it runs the "Enable Neural Rendering" checkbox is disabled with a yellow explanation and
+//     the NR hotkey cannot turn it back on, so OptiScaler's NR never resumes on its own.
 
 using namespace DlssNr::GameNr;
 
@@ -187,11 +190,7 @@ int main()
             return 1;
         }
     }
-    const auto menu = Squash(ReadFile("OptiScaler/dlssnr/DlssNr_Menu.cpp"));
-    const auto off = menu.find("ImGui::TextDisabled(\"NRoff.\");");
-    const auto paused = menu.find("elseif(GameNr::Active()){ImGui::TextWrapped(\"%s\",GameNrPausedMessage);}");
-    assert(off != std::string::npos && paused != std::string::npos && off < paused);
-    std::puts("Test 9 PASS: OptiScaler's own DX12 NR yields to the game's NR and the menu says so");
+    std::puts("Test 9 PASS: OptiScaler's own DX12 NR yields to the game's NR");
 
     // Test 10
     assert(Squash(ReadFile("tests/nr_streamline_hooks.cpp")).find("inlineboolOwnNrEnabled()") != std::string::npos);
@@ -201,6 +200,36 @@ int main()
            std::string::npos);
     std::puts("Test 10 PASS: Windows harnesses provide the OwnNrEnabled / GameNr::Shutdown seams");
 
-    std::puts("All game-native NR unlock tests passed (10/10).");
+    // Test 11
+    const auto create = runtime.substr(runtime.find("NVSDK_NGX_ResultCreateDirect("),
+                                       runtime.find("boolOwns(") - runtime.find("NVSDK_NGX_ResultCreateDirect("));
+    const auto failReturn = create.find("returnresult==NVSDK_NGX_Result_Success?NVSDK_NGX_Result_Fail:result;");
+    const auto recorded = create.find("live[*handle]=std::move(runtime);");
+    const auto forcedOff = create.find("Config::Instance()->DlssNrEnabled.set_volatile_value(false);");
+    assert(failReturn != std::string::npos && recorded != std::string::npos && forcedOff != std::string::npos);
+    assert(failReturn < recorded && recorded < forcedOff &&
+           "OptiScaler's NR is turned off only after a successful create");
+    assert(runtime.find("DlssNrEnabled=") == std::string::npos && "never a saved assignment");
+
+    const auto menu = Squash(ReadFile("OptiScaler/dlssnr/DlssNr_Menu.cpp"));
+    assert(menu.find("constboolgameNr=GameNr::Active();") != std::string::npos);
+    assert(menu.find("ImGui::TextWrapped(\"%s\",driverBlocked?driverMessage.c_str():GameNrActiveMessage);") !=
+           std::string::npos);
+    const auto yellow = menu.find("ImVec4(textColor.x,textColor.y*0.8f,0.0f,textColor.w));ImGui::TextWrapped(\"%s\","
+                                  "driverBlocked?driverMessage.c_str():GameNrActiveMessage);");
+    assert(yellow != std::string::npos && "the explanation uses the driver-gate yellow");
+    assert(menu.find("constboolenableLocked=driverBlocked||gameNr;") != std::string::npos);
+    assert(menu.find("ImGui::BeginDisabled(enableLocked);") != std::string::npos);
+    assert(menu.find("&enabled,toggleWidth)&&!enableLocked)") != std::string::npos &&
+           "the checkbox never writes DlssNrEnabled while locked");
+    assert(menu.find("GameNrPausedMessage") == std::string::npos && "no auto-resume wording left");
+
+    const auto common = Squash(ReadFile("OptiScaler/menu/menu_common.cpp"));
+    const auto hotkeyGuard = common.find("if(inputDlssNr&&DlssNr::GameNr::Active())");
+    const auto toggle = common.find("config->DlssNrEnabled=!config->DlssNrEnabled.value_or_default();");
+    assert(hotkeyGuard != std::string::npos && toggle != std::string::npos && hotkeyGuard < toggle);
+    std::puts("Test 11 PASS: the game's NR turns OptiScaler's off for the session and locks the checkbox and hotkey");
+
+    std::puts("All game-native NR unlock tests passed (11/11).");
     return 0;
 }
