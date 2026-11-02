@@ -115,8 +115,30 @@ Per the maintainer's decisions (2026-10-31 / 2026-11-02):
 The harnesses that compile production slices got matching seams: `OwnNrEnabled` in `nr_streamline_hooks` and
 `nr_private_seam`, and `GameNr::Shutdown` in `nr_shutdown_smoke`.
 
+### 4.8 Which model the game's NR uses (`987204be`)
+- **The diagnostic:** after a successful direct-runtime `CreateFeature(18)`, the game's model settings are logged
+  read-only: `DLSS-NR (game): model settings: ...`.
+  - Each key prints its value, or `unset` when the game hasn't set it.
+  - `DlssNr::GameNr::ModelName` names the weights the preset hint selects in 310.9:
+    - 1 → Original ("Honest Tench");
+    - 0, 2 or unset → Optimized ("Small FP8").
+- **Metro 2033 Redux (2026-11-02):**
+
+  | Creation | Preset | Style | Intensity | LocalStructure | LocalTone | SkinStructure | AutoMask |
+  |---|---|---|---|---|---|---|---|
+  | 1st | 0 | unset | unset | unset | unset | unset | unset |
+  | 2nd | 0 | 0 | 1.00 | 0.80 | 0.80 | 1.00 | 0 |
+
+  - The game sets **preset 0** explicitly, deferring to the runtime's default, so 310.9 runs **Optimized (Small FP8)**.
+    A future runtime with a different default would change the model without a game update.
+  - The tuning values most likely come from the game setting them per evaluation on a reused parameter block, which
+    is why they appear only from the second creation. They differ from OptiScaler's own defaults (structure/tone
+    1.0, skin -1, auto mask on): 4A tuned a gentler look.
+  - OptiScaler forwards all of this unchanged. No driver-side per-game default or NVIDIA App override applies, because
+    the runtime is loaded directly.
+
 ## 5. Test Verification
-- `tests/nr_game_native_unit.cpp` (12/12 PASS):
+- `tests/nr_game_native_unit.cpp` (13/13 PASS; test 13 is the model-settings log):
   1. Windows unlock.
   2. Windows refusals.
   3. Wine unlock.
