@@ -1,4 +1,5 @@
 ﻿#include "../OptiScaler/framegen/smoothmotion/NvPresentAttach.h"
+#include "../OptiScaler/framegen/smoothmotion/NVSmooth30Loader.h"
 
 #include <cassert>
 #include <cstdio>
@@ -23,6 +24,8 @@
 // 6. Loader state is per swapchain: a stale swapchain can't set or close the current one's state.
 // 7. The menu shows "Pending Restart" only when nvsmooth30.dll was loaded after the swapchain, and a heuristic
 //    "Not detected" (with how to verify and report) after the probe window closes.
+// 8. SM86_DIAGNOSTICS is set to 1 at OptiScaler's Trace/Debug log levels and otherwise left untouched (kilyan82's
+//    driver 621.01 log could not tell "no kernels loaded" from "kernels loaded unconverted").
 
 static std::string ReadFile(const char* path)
 {
@@ -267,6 +270,22 @@ int main()
     }
     std::puts("Test 7 PASS: \"Pending Restart\" only when loaded after the swapchain; heuristic \"Not detected\"");
 
-    std::puts("All 7 NVSmooth30 attachment probe tests passed.");
+    // Test 8
+    {
+        static_assert(NVSmooth30Loader::WantsDiagnostics(0) && NVSmooth30Loader::WantsDiagnostics(1));
+        static_assert(!NVSmooth30Loader::WantsDiagnostics(2) && !NVSmooth30Loader::WantsDiagnostics(3) &&
+                      !NVSmooth30Loader::WantsDiagnostics(4));
+
+        const auto loader = Squash(ReadFile("OptiScaler/framegen/smoothmotion/NVSmooth30Loader.cpp"));
+        const auto sanitize = Between(loader, "voidSanitizeEnvironment()", "voidBeginSwapchain(");
+        assert(sanitize.find("constbooldiagnostics=WantsDiagnostics(Config::Instance()->LogLevel.value_or_default());"
+                             "if(diagnostics)SetEnvironmentVariableW(L\"SM86_DIAGNOSTICS\",L\"1\");") !=
+               std::string::npos);
+        assert(sanitize.find("L\"SM86_DIAGNOSTICS\",L\"0\"") == std::string::npos);
+        assert(sanitize.find("SM86_DIAGNOSTICS") == sanitize.rfind("SM86_DIAGNOSTICS"));
+    }
+    std::puts("Test 8 PASS: SM86_DIAGNOSTICS=1 at Trace/Debug, otherwise untouched");
+
+    std::puts("All 8 NVSmooth30 attachment probe tests passed.");
     return 0;
 }

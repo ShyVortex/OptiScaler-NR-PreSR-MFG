@@ -38,6 +38,10 @@ void SetSwapchainAttached(int swapchainId);
 /// Records that the probe window of the swapchain closed. Ignored for a swapchain that is no longer current.
 void SetProbeDone(int swapchainId);
 
+/// Whether NVSmooth30's SM86_DIAGNOSTICS logging is turned on for an OptiScaler log level (0 = Trace, 1 = Debug).
+/// It only adds log lines in nvsmooth30.log (e.g. CUDA kernel loads it left unmodified).
+constexpr bool WantsDiagnostics(int logLevel) { return logLevel <= 1; }
+
 /// Evaluates whether an architecture ID represents Nvidia Ampere (SM86).
 inline bool IsAmpereArch(uint32_t archId) { return (archId == 0x00000170) || ((archId & 0xFFF0) == 0x0170); }
 

@@ -228,3 +228,106 @@ This guarantees that extended Windows interfaces (`IDXGISwapChainMedia`) and pro
 - clang-format 23 clean; UTF-8 BOM present.
 - **Not yet checked in game:** a Windows RTX 30 reporter needs to confirm the log line and menu against an external
   FPS overlay.
+
+### 6.6 kilyan82's driver 621.01 log and NVSmooth30 diagnostics (`889772de`)
+- **Report (2026-11-02):** Windows 11, RTX 3070 Ti, driver 621.01, Neverness to Everness (DX12, UE5). The game runs,
+  but the FPS doesn't double.
+- **A mixed install:**
+  - `OptiScaler.log` reports `OptiScaler v0.9.9-final (d9344618)`, a build from before `NVSmooth30Loader` existed;
+  - `nvsmooth30.log` shows OptiScaler's environment overrides (`D3D11Bridge=0`, `LowLatency=0`) and the dummy-window
+    block, which arrived after v0.9.9 (`8f0bf7d8`, `4518915c`);
+  - so the two logs came from different OptiScaler builds, most likely an old copy under another proxy name next to
+    the new `dxgi.dll`. The reporter was asked to list the folder.
+  - **Confirmed by the preview-build log (2026-11-02, 16:09):**
+    - its line 1 is again `OptiScaler v0.9.9-final (d9344618) loaded`, but it is written at present 799, and the log
+      also holds the new `ProbeNvPresent` line (`NvPresent not detected on swapchain 2 after 3600 presents`);
+    - the preview's own `OptiScaler.dll` (run 41475473778) reports `OptiScaler v0.9.86-pre1 (0504383)`;
+    - `dllmain.cpp` prints that header only at start-up, so a second, old OptiScaler instance started mid-session
+      and truncated the log. That removed the new build's start-up lines, `NVSmooth30Loader` included.
+    - It is not DLSS Unlocked's `OptiScaler/dlss-enabler-headless.dll`, which is v0.9.5-pre3 (`cdf0b4c5`). The file
+      itself is still unidentified.
+- **NVSmooth30 on driver 621.01:**
+  - NvPresent no longer matches the reference layout: `cmp=+0xc40f` and config `+0x7667d0`, against `+0xc41f` /
+    `+0x7f0cd0` on johnCXVII's 616.92.
+  - So NVSmooth30 used `adaptive CUDA hook installed through NvPresent64 GetProcAddress IAT (last resort)`. That hook
+    only redirects `GetProcAddress(..., "cuModuleLoadData")` lookups made after it is installed.
+  - No `CUDA fatbin` line was logged. Either NvPresent never loaded its kernels, or it loaded them past the hook, in
+    which case the SM89 kernels run unconverted and Smooth Motion can't work on SM86.
+  - If it is the hook, the limitation is in NVSmooth30 v0.1.0, not OptiScaler. An offline check of NvPresent64.dll
+    from 621.01 (`tools/inspect_nvp.py`, plus its CUDA imports) is planned.
+- **The change:**
+  - `NVSmooth30Loader::SanitizeEnvironment` sets `SM86_DIAGNOSTICS=1` when OptiScaler's `LogLevel` is 0 or 1
+    (`WantsDiagnostics`); at other levels it leaves the variable untouched.
+  - NVSmooth30 then also logs `CUDA fatbin #N left unmodified ...` and why its reference resolver path was rejected.
+  - The variable adds log lines only (checked in `src/nvpresent.cpp`).
+- **Test:** `tests/nvsmooth30_attach_probe_unit.cpp` test 8 (8/8 PASS).
+
+### 6.7 Driver 621.01 root cause, upstream PR 4 and the packaging source option (`03faacfe`)
+- **What was analysed:** `nvpresent64.dll` from NVIDIA's 621.01 desktop package
+  (`621.01-desktop-win10-win11-64bit-international-dch-whql.exe`, `Display.Driver/nvpresent64.dll`, sha256
+  `f23546294c601cd5c2274ed855e76c1e63c8f77236b0f494429e99a6a7163ea6`). NVSmooth30's `tools/inspect_nvp.py` finds
+  the same gate (`+0xc40f`) and config (`+0x7667d0`) as kilyan82's log. It embeds 37 kernels, each SM89 + SM120
+  only, so on SM86 every kernel must be converted.
+- **Root cause (in NVSmooth30 v0.1.0, not OptiScaler):**
+  - NvPresent has no `nvcuda.dll` import. It statically links the CUDA runtime loader: the resolver at `0x1362e0`
+    runs its init (`0x136310`) once, which calls `LoadLibraryExA("nvcuda.dll", ..., LOAD_LIBRARY_SEARCH_SYSTEM32)`
+    and asks `GetProcAddress` only for `cuGetProcAddress_v2`.
+  - Every other entry point is filled through `cuGetProcAddress`; `cuModuleLoadData` lands in slot `0x771158`
+    (`0x12e277`-`0x12e285`).
+  - NvPresent's only kernel load (`0x4fb40`) goes through wrapper `0x1290d0`, which calls the resolver if the slot is
+    empty and jumps through it. The `cuLibraryLoadData` wrapper has no direct caller.
+  - NVSmooth30's reference path hard-codes 616.92's resolver `0x1348d0` / slot `0x7fb628` and is skipped. Its generic
+    scan runs before the table is filled. Its last-resort hook waits for `GetProcAddress("cuModuleLoadData")`, which
+    this loader never calls. So the kernels load unconverted and no frames are generated.
+- **Upstream fix:** [ItsAdeline/NVSmooth30 PR 4](https://github.com/ItsAdeline/NVSmooth30/pull/4) (Chiamare, head
+  `5b8cc8d6`, v0.1.1, open and unreviewed on 2026-11-02; fixes upstream issue 3).
+  - It locates the resolver and the slot by pattern: the `lea rdx,[slot]` / `lea rcx,["cuModuleLoadData"]` /
+    `call [cuGetProcAddress]` sequence, then the wrapper's `mov rax,[slot]` ... `call resolver`, with the resolver's
+    8-byte prologue, an indirect call and a `ret` checked.
+  - It hooks only when the resolver returns 0 and fills the slot, and refuses an ambiguous match. The unchanged
+    616.92 reference path runs first.
+  - On the 621.01 DLL above it finds `0x1362e0` / `0x771158`, the same as this analysis. The author reports 63 →
+    115 FPS standalone (RTX 3060 Ti, Guild Wars 2).
+- **Packaging option (`03faacfe`):**
+  - `package_release.ps1 -NVSmooth30Repository <url> -NVSmooth30Ref <ref>`, and the `nvsmooth30_repository` /
+    `nvsmooth30_ref` inputs of `package_release.yml`.
+  - A ref is fetched into a fresh temp directory and built there. Without a ref, the old behaviour (local checkout,
+    else upstream's default branch) is unchanged. Nothing is pinned in the repository.
+  - The package records the source in `OptiScaler/licenses/SOURCE.nvsmooth30.txt`.
+  - To ship PR 4 before it is merged: dispatch with `include_nvsmooth30=true` and
+    `nvsmooth30_ref=5b8cc8d6974f5ceb4f83729a8977c8604339552f` (or `pull/4/head`, which follows later pushes).
+- **Test:** `tests/nvsmooth30_packaging_source_unit.cpp` (6/6 PASS); `tests/sm86_packaging_pin_unit.cpp` still
+  passes.
+- **Expected in game (not yet checked):** `nvsmooth30.log` shows `startup 0.1.1`, `cudart lazy table located
+  dynamically: resolver=+0x1362e0 slot=+0x771158`, then `CUDA fatbin #N ... sm89->86=1` lines, and the frame rate
+  doubles.
+- **Still separate:** johnCXVII's first-present `E_NOINTERFACE` on 616.92 (6.2).
+
+### 6.8 DLSS Unlocked dropped or downgraded `nvsmooth30.dll` (`ShyVortex/DLSS-Unlocked` `d9be9a4`, `5ebde8c`)
+- **Report:** kilyan82: "in 0.9.85 i noticed the dll nvsmooth30 is not included anymore".
+- **Checked:**
+  - the zips were listed remotely: the fork's v0.9.85 zip has `OptiScaler/nvsmooth30.dll`;
+  - DLSS Unlocked's NR-v0.9.81 standalone zip has it, and NR-v0.9.85 doesn't. It is the only file that differs.
+- **Defect 1, a cache hit drops the DLL** (`.github/workflows/build-installer.yml` in DLSS Unlocked):
+  - run 41439431829 (11:46) copied `nvsmooth30.dll` into the standalone archive;
+  - the rebuild 41441996982 (12:06) restored `optiscaler-v4-OptiScaler-NR-v0.9.85.zip-…` from cache and exited the
+    download step ("Skipping download.") before the copy. `Dll version/nvsmooth30.dll` wasn't a cached path;
+  - its assets replaced the first run's;
+  - the Inno installer still installed `SM86\smooth-motion.asi` as `nvsmooth30.dll`.
+- **Defect 2, the package copy always won:**
+  - the workflow, `build-optiscaler.ps1` and the installer (`DLSS unlocked.iss` line 93 overwrites line 92) all
+    preferred the OptiScaler package's `nvsmooth30.dll`;
+  - `ebd1af4` had put NVSmooth30 0.1.1 (PR 4) into `SM86/smooth-motion.asi`, which would therefore never ship next to
+    the package's 0.1.0.
+- **Fix (maintainer's choice: the newer version wins):**
+  - `tools/Select-NvSmooth30.ps1` requires `[nvs30] startup %s` and reads each binary's single NUL-delimited
+    `x.y.z` string (NVSmooth30's `NVS30_VERSION`). It ships the newer; the package wins a tie. A file whose version
+    can't be read only wins when the other is unknown or missing. `build-optiscaler.ps1` uses it (`d9be9a4`).
+  - In the workflow, the download step caches the package's copy as `Dll version\nvsmooth30.package.dll`, and the key
+    moves to `optiscaler-v5-`. A new "Select NVSmooth30" step runs on every build, cache hit or not (`5ebde8c`).
+- **Verified:**
+  - with PowerShell 7.4.6 on the real binaries, all 8 cases choose the expected file (by SHA-256): package 0.1.0 vs
+    `.asi` 0.1.1 → `.asi`; 0.1.0 vs 0.1.0 → package; either one missing; either or both unreadable; none;
+  - no parse errors in both scripts and in the two changed inline steps; the YAML parses.
+  - **Not yet:** a real installer build. Expected: the selection line shows 0.1.0 vs 0.1.1 → `.asi`, and the
+    standalone zip contains a 0.1.1 `OptiScaler/nvsmooth30.dll`.

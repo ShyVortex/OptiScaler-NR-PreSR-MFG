@@ -154,7 +154,16 @@ void SanitizeEnvironment()
     SetEnvironmentVariableW(L"SM86_LOW_LATENCY", L"0");
     SetEnvironmentVariableW(L"SM86_ENABLE_OSD", L"0");
     SetEnvironmentVariableW(L"SM86_SKIP_DXGI_HOOKS", L"1");
-    LOG_INFO("NVSmooth30Loader: Runtime environment sanitized (Bridge=0, LowLatency=0, OSD=0, SkipDxgiHooks=1)");
+
+    // 5. At Trace/Debug, turn on NVSmooth30's diagnostic log lines. Otherwise leave the variable alone, so a value
+    //    set in the user's environment still applies.
+    const bool diagnostics = WantsDiagnostics(Config::Instance()->LogLevel.value_or_default());
+    if (diagnostics)
+        SetEnvironmentVariableW(L"SM86_DIAGNOSTICS", L"1");
+
+    LOG_INFO("NVSmooth30Loader: Runtime environment sanitized (Bridge=0, LowLatency=0, OSD=0, SkipDxgiHooks=1, "
+             "Diagnostics={})",
+             diagnostics ? "1" : "unchanged");
 #endif
 }
 
