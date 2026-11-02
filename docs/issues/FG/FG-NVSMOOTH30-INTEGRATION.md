@@ -238,6 +238,14 @@ This guarantees that extended Windows interfaces (`IDXGISwapChainMedia`) and pro
     block, which arrived after v0.9.9 (`8f0bf7d8`, `4518915c`);
   - so the two logs came from different OptiScaler builds, most likely an old copy under another proxy name next to
     the new `dxgi.dll`. The reporter was asked to list the folder.
+  - **Confirmed by the preview-build log (2026-11-02, 16:09):**
+    - its line 1 is again `OptiScaler v0.9.9-final (d9344618) loaded`, but it is written at present 799, and the log
+      also holds the new `ProbeNvPresent` line (`NvPresent not detected on swapchain 2 after 3600 presents`);
+    - the preview's own `OptiScaler.dll` (run 41475473778) reports `OptiScaler v0.9.86-pre1 (0504383)`;
+    - `dllmain.cpp` prints that header only at start-up, so a second, old OptiScaler instance started mid-session
+      and truncated the log. That removed the new build's start-up lines, `NVSmooth30Loader` included.
+    - It is not DLSS Unlocked's `OptiScaler/dlss-enabler-headless.dll`, which is v0.9.5-pre3 (`cdf0b4c5`). The file
+      itself is still unidentified.
 - **NVSmooth30 on driver 621.01:**
   - NvPresent no longer matches the reference layout: `cmp=+0xc40f` and config `+0x7667d0`, against `+0xc41f` /
     `+0x7f0cd0` on johnCXVII's 616.92.
@@ -294,3 +302,32 @@ This guarantees that extended Windows interfaces (`IDXGISwapChainMedia`) and pro
   dynamically: resolver=+0x1362e0 slot=+0x771158`, then `CUDA fatbin #N ... sm89->86=1` lines, and the frame rate
   doubles.
 - **Still separate:** johnCXVII's first-present `E_NOINTERFACE` on 616.92 (6.2).
+
+### 6.8 DLSS Unlocked dropped or downgraded `nvsmooth30.dll` (`ShyVortex/DLSS-Unlocked` `d9be9a4`, `5ebde8c`)
+- **Report:** kilyan82: "in 0.9.85 i noticed the dll nvsmooth30 is not included anymore".
+- **Checked:**
+  - the zips were listed remotely: the fork's v0.9.85 zip has `OptiScaler/nvsmooth30.dll`;
+  - DLSS Unlocked's NR-v0.9.81 standalone zip has it, and NR-v0.9.85 doesn't. It is the only file that differs.
+- **Defect 1, a cache hit drops the DLL** (`.github/workflows/build-installer.yml` in DLSS Unlocked):
+  - run 41439431829 (11:46) copied `nvsmooth30.dll` into the standalone archive;
+  - the rebuild 41441996982 (12:06) restored `optiscaler-v4-OptiScaler-NR-v0.9.85.zip-…` from cache and exited the
+    download step ("Skipping download.") before the copy. `Dll version/nvsmooth30.dll` wasn't a cached path;
+  - its assets replaced the first run's;
+  - the Inno installer still installed `SM86\smooth-motion.asi` as `nvsmooth30.dll`.
+- **Defect 2, the package copy always won:**
+  - the workflow, `build-optiscaler.ps1` and the installer (`DLSS unlocked.iss` line 93 overwrites line 92) all
+    preferred the OptiScaler package's `nvsmooth30.dll`;
+  - `ebd1af4` had put NVSmooth30 0.1.1 (PR 4) into `SM86/smooth-motion.asi`, which would therefore never ship next to
+    the package's 0.1.0.
+- **Fix (maintainer's choice: the newer version wins):**
+  - `tools/Select-NvSmooth30.ps1` requires `[nvs30] startup %s` and reads each binary's single NUL-delimited
+    `x.y.z` string (NVSmooth30's `NVS30_VERSION`). It ships the newer; the package wins a tie. A file whose version
+    can't be read only wins when the other is unknown or missing. `build-optiscaler.ps1` uses it (`d9be9a4`).
+  - In the workflow, the download step caches the package's copy as `Dll version\nvsmooth30.package.dll`, and the key
+    moves to `optiscaler-v5-`. A new "Select NVSmooth30" step runs on every build, cache hit or not (`5ebde8c`).
+- **Verified:**
+  - with PowerShell 7.4.6 on the real binaries, all 8 cases choose the expected file (by SHA-256): package 0.1.0 vs
+    `.asi` 0.1.1 → `.asi`; 0.1.0 vs 0.1.0 → package; either one missing; either or both unreadable; none;
+  - no parse errors in both scripts and in the two changed inline steps; the YAML parses.
+  - **Not yet:** a real installer build. Expected: the selection line shows 0.1.0 vs 0.1.1 → `.asi`, and the
+    standalone zip contains a 0.1.1 `OptiScaler/nvsmooth30.dll`.
