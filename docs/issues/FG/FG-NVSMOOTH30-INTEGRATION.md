@@ -253,3 +253,44 @@ This guarantees that extended Windows interfaces (`IDXGISwapChainMedia`) and pro
   - NVSmooth30 then also logs `CUDA fatbin #N left unmodified ...` and why its reference resolver path was rejected.
   - The variable adds log lines only (checked in `src/nvpresent.cpp`).
 - **Test:** `tests/nvsmooth30_attach_probe_unit.cpp` test 8 (8/8 PASS).
+
+### 6.7 Driver 621.01 root cause, upstream PR 4 and the packaging source option (`03faacfe`)
+- **What was analysed:** `nvpresent64.dll` from NVIDIA's 621.01 desktop package
+  (`621.01-desktop-win10-win11-64bit-international-dch-whql.exe`, `Display.Driver/nvpresent64.dll`, sha256
+  `f23546294c601cd5c2274ed855e76c1e63c8f77236b0f494429e99a6a7163ea6`). NVSmooth30's `tools/inspect_nvp.py` finds
+  the same gate (`+0xc40f`) and config (`+0x7667d0`) as kilyan82's log. It embeds 37 kernels, each SM89 + SM120
+  only, so on SM86 every kernel must be converted.
+- **Root cause (in NVSmooth30 v0.1.0, not OptiScaler):**
+  - NvPresent has no `nvcuda.dll` import. It statically links the CUDA runtime loader: the resolver at `0x1362e0`
+    runs its init (`0x136310`) once, which calls `LoadLibraryExA("nvcuda.dll", ..., LOAD_LIBRARY_SEARCH_SYSTEM32)`
+    and asks `GetProcAddress` only for `cuGetProcAddress_v2`.
+  - Every other entry point is filled through `cuGetProcAddress`; `cuModuleLoadData` lands in slot `0x771158`
+    (`0x12e277`-`0x12e285`).
+  - NvPresent's only kernel load (`0x4fb40`) goes through wrapper `0x1290d0`, which calls the resolver if the slot is
+    empty and jumps through it. The `cuLibraryLoadData` wrapper has no direct caller.
+  - NVSmooth30's reference path hard-codes 616.92's resolver `0x1348d0` / slot `0x7fb628` and is skipped. Its generic
+    scan runs before the table is filled. Its last-resort hook waits for `GetProcAddress("cuModuleLoadData")`, which
+    this loader never calls. So the kernels load unconverted and no frames are generated.
+- **Upstream fix:** [ItsAdeline/NVSmooth30 PR 4](https://github.com/ItsAdeline/NVSmooth30/pull/4) (Chiamare, head
+  `5b8cc8d6`, v0.1.1, open and unreviewed on 2026-11-02; fixes upstream issue 3).
+  - It locates the resolver and the slot by pattern: the `lea rdx,[slot]` / `lea rcx,["cuModuleLoadData"]` /
+    `call [cuGetProcAddress]` sequence, then the wrapper's `mov rax,[slot]` ... `call resolver`, with the resolver's
+    8-byte prologue, an indirect call and a `ret` checked.
+  - It hooks only when the resolver returns 0 and fills the slot, and refuses an ambiguous match. The unchanged
+    616.92 reference path runs first.
+  - On the 621.01 DLL above it finds `0x1362e0` / `0x771158`, the same as this analysis. The author reports 63 →
+    115 FPS standalone (RTX 3060 Ti, Guild Wars 2).
+- **Packaging option (`03faacfe`):**
+  - `package_release.ps1 -NVSmooth30Repository <url> -NVSmooth30Ref <ref>`, and the `nvsmooth30_repository` /
+    `nvsmooth30_ref` inputs of `package_release.yml`.
+  - A ref is fetched into a fresh temp directory and built there. Without a ref, the old behaviour (local checkout,
+    else upstream's default branch) is unchanged. Nothing is pinned in the repository.
+  - The package records the source in `OptiScaler/licenses/SOURCE.nvsmooth30.txt`.
+  - To ship PR 4 before it is merged: dispatch with `include_nvsmooth30=true` and
+    `nvsmooth30_ref=5b8cc8d6974f5ceb4f83729a8977c8604339552f` (or `pull/4/head`, which follows later pushes).
+- **Test:** `tests/nvsmooth30_packaging_source_unit.cpp` (6/6 PASS); `tests/sm86_packaging_pin_unit.cpp` still
+  passes.
+- **Expected in game (not yet checked):** `nvsmooth30.log` shows `startup 0.1.1`, `cudart lazy table located
+  dynamically: resolver=+0x1362e0 slot=+0x771158`, then `CUDA fatbin #N ... sm89->86=1` lines, and the frame rate
+  doubles.
+- **Still separate:** johnCXVII's first-present `E_NOINTERFACE` on 616.92 (6.2).
