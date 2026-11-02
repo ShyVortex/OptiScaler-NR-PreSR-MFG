@@ -28,6 +28,8 @@
 // 11. When the game's NR feature is created, OptiScaler's NR is turned off for the session (volatile, the saved
 //     setting kept); while it runs the "Enable Neural Rendering" checkbox is disabled with a yellow explanation and
 //     the NR hotkey cannot turn it back on, so OptiScaler's NR never resumes on its own.
+// 12. "Preload NR" (default off) loads the direct runtime at the game's NGX D3D12 init after the driver init
+//     succeeded, never on a Windows driver below the 610.88 gate, and keeps it until NGX shutdown.
 
 using namespace DlssNr::GameNr;
 
@@ -230,6 +232,37 @@ int main()
     assert(hotkeyGuard != std::string::npos && toggle != std::string::npos && hotkeyGuard < toggle);
     std::puts("Test 11 PASS: the game's NR turns OptiScaler's off for the session and locks the checkbox and hotkey");
 
-    std::puts("All game-native NR unlock tests passed (11/11).");
+    // Test 12
+    static_assert(ShouldPreload(true, true, false));
+    static_assert(!ShouldPreload(false, true, false), "opt-in");
+    static_assert(!ShouldPreload(true, false, false), "no nvngx_dlssnr.dll");
+    static_assert(!ShouldPreload(true, true, true), "never below the 610.88 gate");
+    assert(Squash(ReadFile("OptiScaler/Config.h")).find("CustomOptional<bool>DlssNrPreload{false};") !=
+           std::string::npos);
+    assert(config.find("DlssNrPreload.set_from_config(readBool(\"DlssNr\",\"Preload\"));") != std::string::npos);
+    assert(config.find("ini.SetValue(\"DlssNr\",\"Preload\",") != std::string::npos);
+    assert(ReadFile("OptiScaler.ini").find("Preload=auto") != std::string::npos);
+    assert(menu.find("PipelineUi::CheckboxWrapped(\"PreloadNR(restart)\",&preload,toggleWidth))config->DlssNrPreload="
+                     "preload;HelpMarker(") != std::string::npos);
+
+    const auto initAt = ngx.find("NVSDK_NGX_APINVSDK_NGX_ResultNVSDK_NGX_D3D12_Init_Ext(");
+    const auto inited = ngx.find("NVNGXProxy::SetDx12Inited(true);", initAt);
+    const auto preloadCall = ngx.find("DlssNr::GameNr::Preload(InDevice);", initAt);
+    const auto preloadRule =
+        ngx.find("DlssNr::GameNr::ShouldPreload(Config::Instance()->DlssNrPreload.value_or_default(),"
+                 "!DlssNr::CompatibilityRuntime::CandidatePaths().empty(),DlssNr::DriverGate::"
+                 "Blocked()))",
+                 initAt);
+    assert(inited != std::string::npos && preloadRule != std::string::npos && preloadCall != std::string::npos);
+    assert(inited < preloadRule && preloadRule < preloadCall && "preload only after the driver init succeeded");
+    assert(ngx.substr(initAt, preloadCall - initAt).find("if(result==NVSDK_NGX_Result_Success){") != std::string::npos);
+
+    const auto preloadBody = runtime.substr(runtime.find("voidPreload(ID3D12Device*device)"));
+    assert(preloadBody.find("autoruntime=CompatibilityRuntime::TryOpen(device);") <
+               preloadBody.find("RetainLocked(runtime);") &&
+           "the preloaded runtime is kept until NGX shutdown");
+    std::puts("Test 12 PASS: Preload NR loads the runtime at NGX init only when allowed and keeps it");
+
+    std::puts("All game-native NR unlock tests passed (12/12).");
     return 0;
 }

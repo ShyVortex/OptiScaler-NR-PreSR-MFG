@@ -7,6 +7,7 @@
 #include <d3d12.h>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -68,6 +69,26 @@ NVSDK_NGX_Result CreateDirect(ID3D12GraphicsCommandList* commands, NVSDK_NGX_Par
         LOG_INFO("DLSS-NR (game): the game runs its own NR; turning OptiScaler's NR off for this session");
     Config::Instance()->DlssNrEnabled.set_volatile_value(false);
     return result;
+}
+
+void Preload(ID3D12Device* device)
+{
+    if (!device)
+        return;
+
+    const auto start = std::chrono::steady_clock::now();
+    auto runtime = CompatibilityRuntime::TryOpen(device);
+    const auto ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+    if (!runtime)
+    {
+        LOG_WARN("DLSS-NR: Preload NR found no usable nvngx_dlssnr.dll ({} ms)", ms);
+        return;
+    }
+
+    LOG_INFO("DLSS-NR: Preload NR loaded the runtime in {} ms", ms);
+    std::lock_guard lock(mutex);
+    RetainLocked(runtime);
 }
 
 bool Owns(const NVSDK_NGX_Handle* handle)

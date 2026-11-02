@@ -259,6 +259,13 @@ void RenderMenu(Config* config, float menuResScale)
                 ImGui::TextWrapped("%s", FinishedPictureNotAppliedWarning);
             ImGui::PopStyleColor();
         }
+
+        bool preload = config->DlssNrPreload.value_or_default();
+        if (PipelineUi::CheckboxWrapped("Preload NR (restart)", &preload, toggleWidth))
+            config->DlssNrPreload = preload;
+        HelpMarker("Loads the Neural Rendering runtime (nvngx_dlssnr.dll) while the game starts, so turning NR on the "
+                   "first time does not freeze the game for several seconds.\nCosts some start-up time and memory "
+                   "even if NR is never used. Takes effect after a restart.");
         ImGui::Spacing();
 
         // Denoise first. Written for people who did not design it: what it does, what it costs, what each knob is.

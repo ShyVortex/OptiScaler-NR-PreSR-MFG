@@ -266,7 +266,15 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_Init_Ext(unsigned long long InApp
             LOG_INFO("calling NVNGXProxy::D3D12_Init_Ext result: {0:X}", (UINT) result);
 
             if (result == NVSDK_NGX_Result_Success)
+            {
                 NVNGXProxy::SetDx12Inited(true);
+
+                // "Preload NR": pay the multi-second nvngx_dlssnr.dll load here, not at the first NR enable.
+                if (DlssNr::GameNr::ShouldPreload(Config::Instance()->DlssNrPreload.value_or_default(),
+                                                  !DlssNr::CompatibilityRuntime::CandidatePaths().empty(),
+                                                  DlssNr::DriverGate::Blocked()))
+                    DlssNr::GameNr::Preload(InDevice);
+            }
         }
         else
         {

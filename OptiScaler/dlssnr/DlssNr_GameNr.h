@@ -56,5 +56,11 @@ constexpr bool ShouldCreateDirect(bool onWine, bool enabled, bool hasCandidate, 
            Decide(onWine, enabled, hasCandidate, driverBlocked, createResult, 0) == Decision::Unlock;
 }
 
+// "Preload NR": load the direct runtime at the game's NGX init, never on a Windows driver below the 610.88 gate.
+constexpr bool ShouldPreload(bool enabled, bool hasCandidate, bool driverBlocked)
+{
+    return enabled && hasCandidate && !driverBlocked;
+}
+
 inline const char* DecisionName(Decision decision) { return decision == Decision::Unlock ? "unlock" : "pass through"; }
 } // namespace DlssNr::GameNr
