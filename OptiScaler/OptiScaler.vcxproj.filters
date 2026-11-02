@@ -830,6 +830,9 @@
     <ClInclude Include="framegen\smoothmotion\NVSmooth30Loader.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="framegen\smoothmotion\NvPresentAttach.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="shaders\hud_copy\precompile\HudCopy_Shader.h">
       <Filter>Header Files</Filter>
     </ClInclude>

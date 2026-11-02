@@ -4178,9 +4178,17 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 {
                     ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.2f, 1.0f), "[Smooth Motion Active (RTX 30)]");
                 }
-                else if (nvSmoothStatus.DllLoaded)
+                else if (nvSmoothStatus.DllLoaded && !nvSmoothStatus.LoadedBeforeSwapchain)
                 {
                     ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.2f, 1.0f), "[Pending Restart: Active on next game launch]");
+                }
+                else if (nvSmoothStatus.DllLoaded && !nvSmoothStatus.ProbeDone)
+                {
+                    ImGui::TextDisabled("[Checking Smooth Motion...]");
+                }
+                else if (nvSmoothStatus.DllLoaded)
+                {
+                    ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.2f, 1.0f), "[Smooth Motion Not Detected]");
                 }
                 else
                 {
@@ -4219,9 +4227,22 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 {
                     ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.2f, 1.0f), "Active (Swapchain bound)");
                 }
+                else if (!nvSmoothStatus.LoadedBeforeSwapchain)
+                {
+                    ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.2f, 1.0f), "Pending Restart (loaded after the swapchain)");
+                }
+                else if (!nvSmoothStatus.ProbeDone)
+                {
+                    ImGui::TextDisabled("Checking the swapchain...");
+                }
                 else
                 {
-                    ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.2f, 1.0f), "Pending Restart (Swapchain not bound)");
+                    ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.2f, 1.0f), "Not detected on the swapchain");
+                    ShowHelpMarker(
+                        "OptiScaler did not find NVIDIA's Smooth Motion (NvPresent64.dll) on the game's swapchain.\n"
+                        "The detection is a heuristic and can miss it: check the frame rate with an external\n"
+                        "overlay (PresentMon or the NVIDIA App). If it does not double, please report it with\n"
+                        "OptiScaler.log and nvsmooth30.log (both next to the game's exe).");
                 }
                 ImGui::SameLine();
                 ImGui::TextDisabled("(%s)", wstring_to_string(nvSmoothStatus.LoadedDllPath).c_str());

@@ -106,6 +106,8 @@ struct MockLoaderState
     std::string loadedPath;
     bool drsProfileApplied = false;
     bool swapchainAttached = false;
+    bool loadedBeforeSwapchain = true;
+    bool probeDone = false;
 
     void Reset()
     {
@@ -113,6 +115,8 @@ struct MockLoaderState
         loadedPath.clear();
         drsProfileApplied = false;
         swapchainAttached = false;
+        loadedBeforeSwapchain = true;
+        probeDone = false;
     }
 
     std::string GetStatusString() const
@@ -121,8 +125,12 @@ struct MockLoaderState
         {
             if (swapchainAttached)
                 return "Active (Swapchain bound)";
+            else if (!loadedBeforeSwapchain)
+                return "Pending Restart (loaded after the swapchain)";
+            else if (!probeDone)
+                return "Checking the swapchain...";
             else
-                return "Pending Restart (Swapchain not bound)";
+                return "Not detected on the swapchain";
         }
         return StatusToString(status);
     }
@@ -133,8 +141,12 @@ struct MockLoaderState
         {
             if (swapchainAttached)
                 return "[Smooth Motion Active (RTX 30)]";
-            else
+            else if (!loadedBeforeSwapchain)
                 return "[Pending Restart: Active on next game launch]";
+            else if (!probeDone)
+                return "[Checking Smooth Motion...]";
+            else
+                return "[Smooth Motion Not Detected]";
         }
         return "[Pending Restart]";
     }
@@ -363,9 +375,19 @@ int main()
         assert(ok);
         assert(loader.status == NVSmooth30Unit::Status::Active);
 
-        // Before swapchain attachment (mid-game toggle / pending restart):
+        // Loaded before the swapchain, probe window still open:
         assert(!loader.swapchainAttached);
-        assert(loader.GetStatusString() == "Pending Restart (Swapchain not bound)");
+        assert(loader.GetStatusString() == "Checking the swapchain...");
+        assert(loader.GetBannerTag() == "[Checking Smooth Motion...]");
+
+        // Probe window closed without detection (heuristic, not a restart requirement):
+        loader.probeDone = true;
+        assert(loader.GetStatusString() == "Not detected on the swapchain");
+        assert(loader.GetBannerTag() == "[Smooth Motion Not Detected]");
+
+        // Loaded after the swapchain was created (mid-game toggle): a restart is required.
+        loader.loadedBeforeSwapchain = false;
+        assert(loader.GetStatusString() == "Pending Restart (loaded after the swapchain)");
         assert(loader.GetBannerTag() == "[Pending Restart: Active on next game launch]");
 
         // After swapchain attachment verified:

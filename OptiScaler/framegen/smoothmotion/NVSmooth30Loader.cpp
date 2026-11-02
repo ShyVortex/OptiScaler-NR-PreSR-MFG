@@ -158,10 +158,27 @@ void SanitizeEnvironment()
 #endif
 }
 
-void SetSwapchainAttached(bool attached)
+void BeginSwapchain(int swapchainId, bool loadedBefore)
 {
     std::lock_guard lock(s_mutex);
-    s_status.SwapchainAttached = attached;
+    s_status.SwapchainId = swapchainId;
+    s_status.SwapchainAttached = false;
+    s_status.ProbeDone = false;
+    s_status.LoadedBeforeSwapchain = loadedBefore;
+}
+
+void SetSwapchainAttached(int swapchainId)
+{
+    std::lock_guard lock(s_mutex);
+    if (s_status.SwapchainId == swapchainId)
+        s_status.SwapchainAttached = true;
+}
+
+void SetProbeDone(int swapchainId)
+{
+    std::lock_guard lock(s_mutex);
+    if (s_status.SwapchainId == swapchainId)
+        s_status.ProbeDone = true;
 }
 
 } // namespace NVSmooth30Loader

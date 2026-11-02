@@ -97,6 +97,11 @@ class DECLSPEC_UUID("3af622a3-82d0-49cd-994f-cce05122c222") WrappedIDXGISwapChai
 
     HWND _handle = nullptr;
 
+    // NVSmooth30: NvPresent attachment probe of this swapchain (NvPresentAttach.h)
+    uint64_t _nvpPresents = 0;
+    bool _nvpProbeOpen = true;
+    void ProbeNvPresent();
+
 #ifdef USE_LOCAL_MUTEX
     OwnedMutex _localMutex;
 #endif

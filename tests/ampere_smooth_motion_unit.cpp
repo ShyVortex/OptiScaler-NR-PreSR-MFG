@@ -386,8 +386,9 @@ int main()
 
     // Test 10: Smooth Motion Status Banner & Tag Logic
     {
-        auto evaluateStatusBanner = [](bool isAmpere, bool dllLoaded, bool swapchainAttached,
-                                       bool smoothMotion) -> std::pair<std::string, std::string>
+        auto evaluateStatusBanner = [](bool isAmpere, bool dllLoaded, bool swapchainAttached, bool smoothMotion,
+                                       bool loadedBeforeSwapchain = false,
+                                       bool probeDone = false) -> std::pair<std::string, std::string>
         {
             if (!smoothMotion)
                 return { "", "" };
@@ -396,8 +397,12 @@ int main()
             {
                 if (dllLoaded && swapchainAttached)
                     return { "[Smooth Motion Active (RTX 30)]", "green" };
-                else if (dllLoaded)
+                else if (dllLoaded && !loadedBeforeSwapchain)
                     return { "[Pending Restart: Active on next game launch]", "amber" };
+                else if (dllLoaded && !probeDone)
+                    return { "[Checking Smooth Motion...]", "grey" };
+                else if (dllLoaded)
+                    return { "[Smooth Motion Not Detected]", "amber" };
                 else
                     return { "[Pending Restart]", "amber" };
             }
@@ -414,6 +419,10 @@ int main()
         // Ampere with DLL loaded but swapchain not bound (mid-game toggle) -> Pending Restart (amber)
         auto [text2, color2] = evaluateStatusBanner(true, true, false, true);
         assert(text2 == "[Pending Restart: Active on next game launch]" && color2 == "amber");
+
+        // Ampere with DLL loaded before the swapchain: checking, then a heuristic "not detected"
+        assert(evaluateStatusBanner(true, true, false, true, true, false).first == "[Checking Smooth Motion...]");
+        assert(evaluateStatusBanner(true, true, false, true, true, true).first == "[Smooth Motion Not Detected]");
 
         // Ampere with DLL not loaded -> Pending Restart (amber)
         auto [text3, color3] = evaluateStatusBanner(true, false, false, true);

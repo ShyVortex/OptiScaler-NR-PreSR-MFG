@@ -8,13 +8,16 @@ namespace NVSmooth30Loader
 {
 struct Status
 {
-    bool Enabled = false;            // Config says to use it
-    bool DllFound = false;           // nvsmooth30.dll found in OptiScaler directory
-    bool DllLoaded = false;          // LoadLibrary succeeded
-    bool SmoothMotionActive = false; // NVIDIA Smooth Motion DRS setting applied
-    bool SwapchainAttached = false;  // Verified attached to active DXGI SwapChain
-    std::wstring LoadedDllPath;      // Absolute path of loaded DLL
-    std::string ErrorMessage;        // Human-readable error if anything failed
+    bool Enabled = false;               // Config says to use it
+    bool DllFound = false;              // nvsmooth30.dll found in OptiScaler directory
+    bool DllLoaded = false;             // LoadLibrary succeeded
+    bool SmoothMotionActive = false;    // NVIDIA Smooth Motion DRS setting applied
+    bool SwapchainAttached = false;     // NvPresent64.dll detected on the current DXGI swapchain
+    bool LoadedBeforeSwapchain = false; // nvsmooth30.dll was loaded before the current swapchain was created
+    bool ProbeDone = false;             // The attachment probe window of the current swapchain has closed
+    int SwapchainId = 0;                // OptiScaler id of the current (most recently created) swapchain
+    std::wstring LoadedDllPath;         // Absolute path of loaded DLL
+    std::string ErrorMessage;           // Human-readable error if anything failed
 };
 
 Status LastStatus();
@@ -26,8 +29,14 @@ void TrySetup();
 /// Applies sanitized environment variables before loading nvsmooth30.dll.
 void SanitizeEnvironment();
 
-/// Records whether NvPresent64.dll is genuinely attached to the active swapchain.
-void SetSwapchainAttached(bool attached);
+/// A new swapchain became current: reset its attachment state and start a new probe window.
+void BeginSwapchain(int swapchainId, bool loadedBefore);
+
+/// Records that NvPresent64.dll was detected on the swapchain. Ignored for a swapchain that is no longer current.
+void SetSwapchainAttached(int swapchainId);
+
+/// Records that the probe window of the swapchain closed. Ignored for a swapchain that is no longer current.
+void SetProbeDone(int swapchainId);
 
 /// Evaluates whether an architecture ID represents Nvidia Ampere (SM86).
 inline bool IsAmpereArch(uint32_t archId) { return (archId == 0x00000170) || ((archId & 0xFFF0) == 0x0170); }

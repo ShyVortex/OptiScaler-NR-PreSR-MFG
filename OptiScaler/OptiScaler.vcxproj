@@ -354,6 +354,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClInclude Include="framegen\dlssg\AmpereMfgStatusText.h" />
     <ClInclude Include="framegen\dlssg\DlssgRuntimeGeneration.h" />
     <ClInclude Include="framegen\smoothmotion\NVSmooth30Loader.h" />
+    <ClInclude Include="framegen\smoothmotion\NvPresentAttach.h" />
     <ClInclude Include="dlssnr\PassProfiles.h" />
     <ClInclude Include="framegen\ffx\FSRFG_Dx12.h" />
     <ClInclude Include="framegen\IFGFeature.h" />

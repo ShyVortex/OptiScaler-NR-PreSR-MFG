@@ -11,6 +11,7 @@
 #include <hooks/D3D12_Hooks.h>
 #include <hooks/FgGpuTimeSource.h>
 #include <framegen/smoothmotion/NVSmooth30Loader.h>
+#include <framegen/smoothmotion/NvPresentAttach.h>
 
 #include <menu/menu_overlay_dx.h>
 
@@ -568,6 +569,81 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
     return presentResult;
 }
 
+void WrappedIDXGISwapChain4::ProbeNvPresent()
+{
+    if (!_nvpProbeOpen)
+        return;
+
+    const uint64_t present = ++_nvpPresents;
+    if (!NvPresentAttach::ShouldProbe(present))
+        return;
+
+    const auto status = NVSmooth30Loader::LastStatus();
+    if (!status.DllLoaded || status.SwapchainId != _id)
+    {
+        _nvpProbeOpen = false;
+        return;
+    }
+
+    HMODULE hNvPresent = GetModuleHandleW(L"NvPresent64.dll");
+    if (hNvPresent != nullptr)
+    {
+        uintptr_t imageStart = 0;
+        uintptr_t imageEnd = 0;
+        const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(hNvPresent);
+        if (dos->e_magic == IMAGE_DOS_SIGNATURE)
+        {
+            const auto* nt =
+                reinterpret_cast<const IMAGE_NT_HEADERS*>(reinterpret_cast<const BYTE*>(hNvPresent) + dos->e_lfanew);
+            if (nt->Signature == IMAGE_NT_SIGNATURE)
+            {
+                imageStart = reinterpret_cast<uintptr_t>(hNvPresent);
+                imageEnd = imageStart + nt->OptionalHeader.SizeOfImage;
+            }
+        }
+
+        const auto readable = [](const void* address, size_t size) -> bool
+        {
+            if (address == nullptr || size == 0)
+                return false;
+
+            MEMORY_BASIC_INFORMATION info {};
+            if (VirtualQuery(address, &info, sizeof(info)) == 0 || info.State != MEM_COMMIT ||
+                (info.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0)
+                return false;
+
+            const auto begin = reinterpret_cast<uintptr_t>(address);
+            const auto region = reinterpret_cast<uintptr_t>(info.BaseAddress);
+            return begin >= region && size <= info.RegionSize && begin - region <= info.RegionSize - size;
+        };
+
+        const auto inNvPresent = [imageStart, imageEnd](const void* address) -> bool
+        {
+            const auto value = reinterpret_cast<uintptr_t>(address);
+            return imageStart != 0 && value >= imageStart && value < imageEnd;
+        };
+
+        const auto result = NvPresentAttach::Probe(_real, readable, inNvPresent);
+        if (result.attached)
+        {
+            _nvpProbeOpen = false;
+            NVSmooth30Loader::SetSwapchainAttached(_id);
+            LOG_INFO("NVSmooth30: NvPresent attached to swapchain {} (offset 0x{:X}, present {})", _id, result.offset,
+                     present);
+            return;
+        }
+    }
+
+    if (NvPresentAttach::WindowClosed(present))
+    {
+        _nvpProbeOpen = false;
+        NVSmooth30Loader::SetProbeDone(_id);
+        LOG_WARN("NVSmooth30: NvPresent not detected on swapchain {} after {} presents (NvPresent64.dll loaded: {}, "
+                 "nvsmooth30.dll loaded before the swapchain: {})",
+                 _id, present, hNvPresent != nullptr, status.LoadedBeforeSwapchain);
+    }
+}
+
 WrappedIDXGISwapChain4::WrappedIDXGISwapChain4(IDXGISwapChain* real, IUnknown* pDevice, HWND hWnd, UINT flags,
                                                bool isUWP, bool isComposition)
     : _real(real), _device(pDevice), _handle(hWnd), _refcount(1), _uwp(isUWP), _composition(isComposition)
@@ -596,73 +672,8 @@ WrappedIDXGISwapChain4::WrappedIDXGISwapChain4(IDXGISwapChain* real, IUnknown* p
 
     CheckForHdrOutput();
 
-    HMODULE hNvPresent = GetModuleHandleW(L"NvPresent64.dll");
-    if (hNvPresent != nullptr && _real != nullptr)
-    {
-        const auto isAddressInModule = [](void* address, HMODULE hModule) -> bool
-        {
-            if (address == nullptr || hModule == nullptr)
-                return false;
-
-            const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(hModule);
-            if (dos->e_magic == IMAGE_DOS_SIGNATURE)
-            {
-                const auto* nt =
-                    reinterpret_cast<const IMAGE_NT_HEADERS*>(reinterpret_cast<const BYTE*>(hModule) + dos->e_lfanew);
-                if (nt->Signature == IMAGE_NT_SIGNATURE)
-                {
-                    uintptr_t addr = reinterpret_cast<uintptr_t>(address);
-                    uintptr_t start = reinterpret_cast<uintptr_t>(hModule);
-                    uintptr_t end = start + nt->OptionalHeader.SizeOfImage;
-                    if (addr >= start && addr < end)
-                        return true;
-                }
-            }
-
-            HMODULE addrMod = nullptr;
-            if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                                       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                                   reinterpret_cast<LPCSTR>(address), &addrMod))
-            {
-                return addrMod == hModule;
-            }
-
-            return false;
-        };
-
-        void** vtable = *reinterpret_cast<void***>(_real);
-        bool attached = false;
-        if (vtable != nullptr)
-        {
-            if (isAddressInModule(vtable[0], hNvPresent) || isAddressInModule(vtable[8], hNvPresent) ||
-                isAddressInModule(vtable[22], hNvPresent))
-            {
-                attached = true;
-            }
-            else
-            {
-                // Check candidate pointer at offset +0x18 (common for interposers wrapping underlying swapchain)
-                const auto* bytes = reinterpret_cast<const std::byte*>(_real);
-                void* candidate = nullptr;
-                std::memcpy(&candidate, bytes + 0x18, sizeof(candidate));
-                if (candidate != nullptr && candidate != _real)
-                {
-                    void** candVtable = *reinterpret_cast<void***>(candidate);
-                    if (candVtable != nullptr &&
-                        (isAddressInModule(candVtable[0], hNvPresent) || isAddressInModule(candVtable[8], hNvPresent) ||
-                         isAddressInModule(candVtable[22], hNvPresent)))
-                    {
-                        attached = true;
-                    }
-                }
-            }
-        }
-        if (attached || !NVSmooth30Loader::GetStatus().SwapchainAttached)
-        {
-            NVSmooth30Loader::SetSwapchainAttached(attached);
-        }
-        LOG_INFO("NVSmooth30: Swapchain attachment verified = {}", attached);
-    }
+    // NvPresent attaches during the first presents, so attachment is probed from Present/Present1, not here.
+    NVSmooth30Loader::BeginSwapchain(_id, NVSmooth30Loader::LastStatus().DllLoaded);
 
     LOG_INFO("{} created, real: {:X}, refCount: {}", _id, (UINT64) real, refCount);
 }
@@ -878,6 +889,7 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::Present(UINT SyncInterval, UIN
     if ((Flags & DXGI_PRESENT_TEST) == 0)
     {
         result = LocalPresent(_real, SyncInterval, Flags, nullptr, _device, _handle, _uwp);
+        ProbeNvPresent();
 
         // When Reflex can't be used to limit, sleep in present
         if (!State::Instance().reflexLimitsFps && State::Instance().activeFgOutput == FGOutput::NoFG &&
@@ -1250,6 +1262,7 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::Present1(UINT SyncInterval, UI
     if ((Flags & DXGI_PRESENT_TEST) == 0)
     {
         result = LocalPresent(_real1, SyncInterval, Flags, pPresentParameters, _device, _handle, _uwp);
+        ProbeNvPresent();
 
         // When Reflex can't be used to limit, sleep in present
         if (!State::Instance().reflexLimitsFps && State::Instance().activeFgOutput == FGOutput::NoFG &&
