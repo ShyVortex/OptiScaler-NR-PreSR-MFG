@@ -33,6 +33,16 @@ on:
         required: false
         default: false
         type: boolean
+      nvsmooth30_repository:
+        description: 'NVSmooth30 repository (used with Include NVSmooth30)'
+        required: false
+        default: 'https://github.com/ItsAdeline/NVSmooth30.git'
+        type: string
+      nvsmooth30_ref:
+        description: 'NVSmooth30 ref: branch, tag, commit SHA or pull/N/head (empty = default branch)'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -91,14 +101,17 @@ jobs:
         }
         Write-Host "dlssg_for_sm86 0.4.1 modular files verified."
 
+    # With an explicit ref, package_release.ps1 fetches and builds that ref itself.
     - name: Ensure NVSmooth30 files are present
-      if: ${{ inputs.include_nvsmooth30 }}
+      if: ${{ inputs.include_nvsmooth30 && inputs.nvsmooth30_ref == '' }}
+      env:
+        NVSMOOTH30_REPOSITORY: ${{ inputs.nvsmooth30_repository }}
       shell: powershell
       run: |
         if (-not (Test-Path "nvsmooth30\bin\version.dll") -and -not (Test-Path "nvsmooth30\build\Release\version.dll")) {
             if (-not (Test-Path "nvsmooth30\CMakeLists.txt")) {
-                Write-Host "nvsmooth30 not found; cloning from https://github.com/ItsAdeline/NVSmooth30.git..."
-                git clone --depth 1 https://github.com/ItsAdeline/NVSmooth30.git nvsmooth30
+                Write-Host "nvsmooth30 not found; cloning from $env:NVSMOOTH30_REPOSITORY..."
+                git clone --depth 1 $env:NVSMOOTH30_REPOSITORY nvsmooth30
                 if ($LASTEXITCODE -ne 0) { throw 'Cannot clone NVSmooth30 repository' }
             }
             Write-Host "Building nvsmooth30 from source with CMake..."
@@ -149,6 +162,8 @@ jobs:
       shell: powershell
       env:
         PACKAGE_VERSION: ${{ inputs.version }}
+        NVSMOOTH30_REPOSITORY: ${{ inputs.nvsmooth30_repository }}
+        NVSMOOTH30_REF: ${{ inputs.nvsmooth30_ref }}
       run: |
         $params = @{
             Version = $env:PACKAGE_VERSION
@@ -168,6 +183,12 @@ jobs:
         }
         if ("${{ inputs.include_nvsmooth30 }}" -eq "true") {
             $params["IncludeNVSmooth30"] = $true
+            if ($env:NVSMOOTH30_REPOSITORY) {
+                $params["NVSmooth30Repository"] = $env:NVSMOOTH30_REPOSITORY
+            }
+            if ($env:NVSMOOTH30_REF) {
+                $params["NVSmooth30Ref"] = $env:NVSMOOTH30_REF
+            }
         }
 
         Write-Host "Executing package_release.ps1 with options:"

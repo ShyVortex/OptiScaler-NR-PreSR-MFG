@@ -18,6 +18,12 @@ param(
     [switch]$AcceptAmpereMfgLicenses,
     [switch]$UpdateAmpereMfg,
     [switch]$IncludeNVSmooth30,
+    # NVSmooth30 source. Default: upstream's default branch. -NVSmooth30Ref picks a branch, tag, commit SHA or
+    # pull/N/head (e.g. an unmerged upstream fix), fetched into a temp directory and built there.
+    [ValidatePattern('^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(\.git)?$')]
+    [string]$NVSmooth30Repository = 'https://github.com/ItsAdeline/NVSmooth30.git',
+    [ValidatePattern('^$|^[A-Za-z0-9._/-]+$')]
+    [string]$NVSmooth30Ref = '',
     [string]$HybridAssetsDirectory,
     [string]$StreamlineArchive
 )
@@ -418,27 +424,60 @@ if ($IncludeAmpereMfg) {
 }
 
 if ($IncludeNVSmooth30) {
-    $nvSmoothSrc = "$root\nvsmooth30"
-    $nvSmoothDll = "$nvSmoothSrc\bin\version.dll"
-    if (-not (Test-Path -LiteralPath $nvSmoothDll) -and (Test-Path -LiteralPath "$nvSmoothSrc\build\Release\version.dll")) {
+    $cmake = (Get-Command cmake.exe -ErrorAction SilentlyContinue).Source
+    $nvSmoothSource = 'local'
+
+    if ($NVSmooth30Ref) {
+        # A requested ref is built in its own temp directory; the local nvsmooth30\ checkout is never used or touched.
+        $nvSmoothSrc = Join-Path ([IO.Path]::GetTempPath()) ("nvsmooth30-" + [Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force -Path $nvSmoothSrc | Out-Null
+        Write-Host "NVSmooth30: fetching $NVSmooth30Ref from $NVSmooth30Repository..."
+        git -C $nvSmoothSrc init --quiet
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot initialise the NVSmooth30 checkout' }
+        git -C $nvSmoothSrc remote add origin $NVSmooth30Repository
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot add the NVSmooth30 remote' }
+        git -C $nvSmoothSrc fetch --depth 1 origin $NVSmooth30Ref
+        if ($LASTEXITCODE -ne 0) { throw "Cannot fetch NVSmooth30 ref $NVSmooth30Ref" }
+        git -C $nvSmoothSrc checkout --quiet --detach FETCH_HEAD
+        if ($LASTEXITCODE -ne 0) { throw "Cannot check out NVSmooth30 ref $NVSmooth30Ref" }
+        $nvSmoothCommit = (git -C $nvSmoothSrc rev-parse HEAD).Trim()
+        $nvSmoothSource = "$NVSmooth30Repository@$nvSmoothCommit (ref $NVSmooth30Ref)"
+        if (-not $cmake) { throw 'CMake is required to build NVSmooth30 from a ref' }
+        Write-Host "Building nvsmooth30 $nvSmoothCommit with CMake..."
+        & $cmake -S $nvSmoothSrc -B "$nvSmoothSrc\build" -A x64
+        if ($LASTEXITCODE -ne 0) { throw 'CMake configuration for nvsmooth30 failed' }
+        & $cmake --build "$nvSmoothSrc\build" --config Release
+        if ($LASTEXITCODE -ne 0) { throw 'CMake build for nvsmooth30 failed' }
         $nvSmoothDll = "$nvSmoothSrc\build\Release\version.dll"
     }
-    if (-not (Test-Path -LiteralPath $nvSmoothDll)) {
-        if (-not (Test-Path -LiteralPath "$nvSmoothSrc\CMakeLists.txt")) {
-            Write-Host "nvsmooth30 not found; cloning from https://github.com/ItsAdeline/NVSmooth30.git..."
-            git clone --depth 1 https://github.com/ItsAdeline/NVSmooth30.git $nvSmoothSrc
-            if ($LASTEXITCODE -ne 0) { throw 'Cannot clone NVSmooth30 repository' }
+    else {
+        $nvSmoothSrc = "$root\nvsmooth30"
+        $nvSmoothDll = "$nvSmoothSrc\bin\version.dll"
+        if (-not (Test-Path -LiteralPath $nvSmoothDll) -and (Test-Path -LiteralPath "$nvSmoothSrc\build\Release\version.dll")) {
+            $nvSmoothDll = "$nvSmoothSrc\build\Release\version.dll"
         }
-        $cmake = (Get-Command cmake.exe -ErrorAction SilentlyContinue).Source
-        if ($cmake -and (Test-Path -LiteralPath "$nvSmoothSrc\CMakeLists.txt")) {
-            Write-Host "Building nvsmooth30 from source with CMake..."
-            & $cmake -S $nvSmoothSrc -B "$nvSmoothSrc\build" -A x64
-            if ($LASTEXITCODE -ne 0) { throw 'CMake configuration for nvsmooth30 failed' }
-            & $cmake --build "$nvSmoothSrc\build" --config Release
-            if ($LASTEXITCODE -ne 0) { throw 'CMake build for nvsmooth30 failed' }
-            if (Test-Path -LiteralPath "$nvSmoothSrc\build\Release\version.dll") {
-                $nvSmoothDll = "$nvSmoothSrc\build\Release\version.dll"
+        if (-not (Test-Path -LiteralPath $nvSmoothDll)) {
+            if (-not (Test-Path -LiteralPath "$nvSmoothSrc\CMakeLists.txt")) {
+                Write-Host "nvsmooth30 not found; cloning from $NVSmooth30Repository..."
+                git clone --depth 1 $NVSmooth30Repository $nvSmoothSrc
+                if ($LASTEXITCODE -ne 0) { throw 'Cannot clone NVSmooth30 repository' }
+                $nvSmoothCommit = (git -C $nvSmoothSrc rev-parse HEAD).Trim()
+                $nvSmoothSource = "$NVSmooth30Repository@$nvSmoothCommit (default branch)"
             }
+            if ($cmake -and (Test-Path -LiteralPath "$nvSmoothSrc\CMakeLists.txt")) {
+                Write-Host "Building nvsmooth30 from source with CMake..."
+                & $cmake -S $nvSmoothSrc -B "$nvSmoothSrc\build" -A x64
+                if ($LASTEXITCODE -ne 0) { throw 'CMake configuration for nvsmooth30 failed' }
+                & $cmake --build "$nvSmoothSrc\build" --config Release
+                if ($LASTEXITCODE -ne 0) { throw 'CMake build for nvsmooth30 failed' }
+                if (Test-Path -LiteralPath "$nvSmoothSrc\build\Release\version.dll") {
+                    $nvSmoothDll = "$nvSmoothSrc\build\Release\version.dll"
+                }
+            }
+        }
+        if ($nvSmoothSource -eq 'local' -and (Test-Path -LiteralPath "$nvSmoothSrc\.git")) {
+            $nvSmoothCommit = (git -C $nvSmoothSrc rev-parse HEAD).Trim()
+            if ($LASTEXITCODE -eq 0 -and $nvSmoothCommit) { $nvSmoothSource = "local checkout @$nvSmoothCommit" }
         }
     }
     if (-not (Test-Path -LiteralPath $nvSmoothDll)) {
@@ -448,12 +487,14 @@ if ($IncludeNVSmooth30) {
     New-Item -ItemType Directory -Force -Path $optiScalerDir | Out-Null
     Copy-Item -LiteralPath $nvSmoothDll -Destination "$optiScalerDir\nvsmooth30.dll"
 
+    $licenseDir = "$optiScalerDir\licenses"
+    New-Item -ItemType Directory -Force -Path $licenseDir | Out-Null
     $nvSmoothLicense = "$nvSmoothSrc\LICENSE"
     if (Test-Path -LiteralPath $nvSmoothLicense) {
-        $licenseDir = "$optiScalerDir\licenses"
-        New-Item -ItemType Directory -Force -Path $licenseDir | Out-Null
         Copy-Item -LiteralPath $nvSmoothLicense -Destination "$licenseDir\LICENSE.nvsmooth30.txt"
     }
+    Set-Content -LiteralPath "$licenseDir\SOURCE.nvsmooth30.txt" -Value "NVSmooth30 source: $nvSmoothSource" -Encoding ascii
+    Write-Host "NVSmooth30 source: $nvSmoothSource"
     Write-Host "NVSmooth30: staged to OptiScaler\nvsmooth30.dll"
 }
 
