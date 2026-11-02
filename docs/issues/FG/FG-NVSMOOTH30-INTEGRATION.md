@@ -228,3 +228,28 @@ This guarantees that extended Windows interfaces (`IDXGISwapChainMedia`) and pro
 - clang-format 23 clean; UTF-8 BOM present.
 - **Not yet checked in game:** a Windows RTX 30 reporter needs to confirm the log line and menu against an external
   FPS overlay.
+
+### 6.6 kilyan82's driver 621.01 log and NVSmooth30 diagnostics (`889772de`)
+- **Report (2026-11-02):** Windows 11, RTX 3070 Ti, driver 621.01, Neverness to Everness (DX12, UE5). The game runs,
+  but the FPS doesn't double.
+- **A mixed install:**
+  - `OptiScaler.log` reports `OptiScaler v0.9.9-final (d9344618)`, a build from before `NVSmooth30Loader` existed;
+  - `nvsmooth30.log` shows OptiScaler's environment overrides (`D3D11Bridge=0`, `LowLatency=0`) and the dummy-window
+    block, which arrived after v0.9.9 (`8f0bf7d8`, `4518915c`);
+  - so the two logs came from different OptiScaler builds, most likely an old copy under another proxy name next to
+    the new `dxgi.dll`. The reporter was asked to list the folder.
+- **NVSmooth30 on driver 621.01:**
+  - NvPresent no longer matches the reference layout: `cmp=+0xc40f` and config `+0x7667d0`, against `+0xc41f` /
+    `+0x7f0cd0` on johnCXVII's 616.92.
+  - So NVSmooth30 used `adaptive CUDA hook installed through NvPresent64 GetProcAddress IAT (last resort)`. That hook
+    only redirects `GetProcAddress(..., "cuModuleLoadData")` lookups made after it is installed.
+  - No `CUDA fatbin` line was logged. Either NvPresent never loaded its kernels, or it loaded them past the hook, in
+    which case the SM89 kernels run unconverted and Smooth Motion can't work on SM86.
+  - If it is the hook, the limitation is in NVSmooth30 v0.1.0, not OptiScaler. An offline check of NvPresent64.dll
+    from 621.01 (`tools/inspect_nvp.py`, plus its CUDA imports) is planned.
+- **The change:**
+  - `NVSmooth30Loader::SanitizeEnvironment` sets `SM86_DIAGNOSTICS=1` when OptiScaler's `LogLevel` is 0 or 1
+    (`WantsDiagnostics`); at other levels it leaves the variable untouched.
+  - NVSmooth30 then also logs `CUDA fatbin #N left unmodified ...` and why its reference resolver path was rejected.
+  - The variable adds log lines only (checked in `src/nvpresent.cpp`).
+- **Test:** `tests/nvsmooth30_attach_probe_unit.cpp` test 8 (8/8 PASS).
