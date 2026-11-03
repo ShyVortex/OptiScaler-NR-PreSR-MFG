@@ -103,6 +103,25 @@ In External FG mode, attach only a log-only `slInit` hook (Streamline 2 and Stre
 
 The functional fix will be planned after the next run shows Streamline's reason.
 
+### 5.1 First in-game run (`4f53087c`): the hook attached too late in Lost Soul Aside
+- The log shows `External FG: Streamline 2.7.32 log capture only`, but `hkslInit_logOnly` never ran.
+- External mode skips every `sl.*` load in `LibraryLoadHooks::LoadLibraryCheckW` (the `externalFrameGeneration`
+  check at the top, upstream `a60f3c93`). OptiScaler therefore found the interposer only through
+  `CheckModulesInMemory` polling, and Lost Soul Aside had already called `slInit`.
+- TLOU2 calls `slInit` about 0.6 s after OptiScaler finds the interposer. Capture worked there (1,253 Streamline
+  lines), and FG was unaffected.
+- TLOU2 also shows that `hkcommon_slOnPluginLoad` / `hkdlssg_slOnPluginLoad` do not run in External mode
+  (`hookCommon` attaches after the plugins loaded), yet FG works. Their absence is not the Lost Soul Aside cause.
+  VSync is off (`SyncInterval 0`, tearing flag) and HAGS is on, so their relaxations are not needed here.
+
+### 5.2 Follow-up (`3f325df3`): notify after the original load
+- `NtdllHooks::hkLdrLoadDll` / `hkNtLoadDll` call `LibraryLoadHooks::OnOriginalLoad` after the original loader
+  succeeded.
+- In External mode, for `sl.interposer.dll` only (`StreamlineLogPrefs::ShouldNotifyInterposerLoad`), that attaches
+  the log-only hook before the caller reaches `slInit`.
+- The load itself is unchanged. `slInterposerModule` is still set by `CheckModulesInMemory`, because `Dxgi_Hooks`
+  delays factory calls from that module when factory wrapping is on.
+
 ## 6. Verification
 - [ ] `tests/streamline_external_log_capture_unit.cpp` passes; the existing `streamline_*` suites still pass.
 - [ ] In game: Lost Soul Aside shows Streamline log lines in `OptiScaler.log` with FG behaviour unchanged.
@@ -113,5 +132,16 @@ The functional fix will be planned after the next run shows Streamline's reason.
   released normally. There is no DLL detach, and the process had to be force-closed.
 - XeMFG run: the same sequence ends with `hk_xessDestroyContext` (09:15:38). About 49 s later
   `XeMfgLoader::Shutdown` runs and the process exits.
-- The blocking module is unknown. A memory dump taken while the process hangs (Task Manager, Create memory dump
-  file) would show it. Tracked separately from the frame generation issue.
+- Full memory dump taken during the hang (4.2 GB), frames resolved with Microsoft public symbols for `ntdll`,
+  `KERNELBASE`, `D3D12` and `D3D12Core`:
+  - The process had not reached exit: all 36 threads were alive, including the Streamline and OTA `sl.common`
+    workers.
+  - The render thread (tid 20984) was in the game's own shutdown, releasing D3D12 pipeline states:
+    game exe → `CUseCountedObject::Release` (D3D12) → `CPipelineState::~CPipelineState` → `CShader` →
+    `CShaderBytecode` → `ShaderParser::~ShaderParser` → `RtlFreeHeap` → `RtlpInsertFreeBlock`.
+  - Its instruction pointer was inside the heap code, not in a wait. No OptiScaler, unlocker or Streamline frame was
+    on that thread.
+  - The only OptiScaler thread (tid 18084) was in `SleepEx` → `ZwDelayExecution`: a sleeping worker loop.
+- One dump cannot tell a very slow pipeline-state teardown from a spin on a corrupted heap. The XeMFG run's ~49 s
+  exit suggests the teardown is slow in any case. Next checks: CPU usage during the hang, a second dump ~30 s later,
+  or waiting 2-3 minutes before force-closing. Tracked separately from the frame generation issue.
