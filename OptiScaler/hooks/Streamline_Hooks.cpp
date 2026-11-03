@@ -1,6 +1,7 @@
 ﻿#include <pch.h>
 
 #include "Streamline_Hooks.h"
+#include "StreamlineLogPrefs.h"
 #if defined(OPTISCALER_RTX40_MFG)
 #include <framegen/dlssg/MfgUnlock.h>
 #endif
@@ -114,10 +115,7 @@ sl::Result StreamlineHooks::hkslInit(const sl::Preferences& pref, uint64_t sdkVe
 
     sl::Preferences localPref = pref;
 
-    if (localPref.logMessageCallback != &streamlineLogCallback)
-        o_logCallback = localPref.logMessageCallback;
-    localPref.logLevel = sl::LogLevel::eCount;
-    localPref.logMessageCallback = &streamlineLogCallback;
+    StreamlineLogPrefs::ApplyLogCapture(localPref, &streamlineLogCallback, sl::LogLevel::eCount, o_logCallback);
 
     // renderAPI is optional so need to be careful, should only matter for Vulkan
     renderApi = localPref.renderAPI;
@@ -642,11 +640,36 @@ bool StreamlineHooks::hkslInit_sl1(const sl1::Preferences& pref, int application
 
     sl1::Preferences localPref = pref;
 
-    if (localPref.logMessageCallback != &streamlineLogCallback_sl1)
-        o_logCallback_sl1 = localPref.logMessageCallback;
-    localPref.logLevel = sl1::LogLevel::eLogLevelCount;
-    localPref.logMessageCallback = &streamlineLogCallback_sl1;
+    StreamlineLogPrefs::ApplyLogCapture(localPref, &streamlineLogCallback_sl1, sl1::LogLevel::eLogLevelCount,
+                                        o_logCallback_sl1);
     return o_slInit_sl1(localPref, applicationId);
+}
+
+// External FG: only Streamline's log is redirected. Plugin paths, features to load, engine and flags stay exactly as
+// the game passed them (architecture rule 4, FG-LSA-EXTERNAL-MFG-NO-FEATURE-CREATE.md).
+sl::Result StreamlineHooks::hkslInit_logOnly(const sl::Preferences& pref, uint64_t sdkVersion)
+{
+    LOG_FUNC();
+
+    sl::Preferences localPref = pref;
+    StreamlineLogPrefs::ApplyLogCapture(localPref, &streamlineLogCallback, sl::LogLevel::eCount, o_logCallback);
+
+    const auto result = o_slInit_logOnly(localPref, sdkVersion);
+    LOG_INFO("External FG: slInit result {}", static_cast<int>(result));
+    return result;
+}
+
+bool StreamlineHooks::hkslInit_sl1_logOnly(const sl1::Preferences& pref, int applicationId)
+{
+    LOG_FUNC();
+
+    sl1::Preferences localPref = pref;
+    StreamlineLogPrefs::ApplyLogCapture(localPref, &streamlineLogCallback_sl1, sl1::LogLevel::eLogLevelCount,
+                                        o_logCallback_sl1);
+
+    const auto result = o_slInit_sl1_logOnly(localPref, applicationId);
+    LOG_INFO("External FG: SL1 slInit result {}", result);
+    return result;
 }
 
 bool StreamlineHooks::hkslSetTag_sl1(const sl1::Resource* resource, sl1::BufferType tag, uint32_t id,
@@ -2048,6 +2071,112 @@ void StreamlineHooks::unhookInterposer()
         o_logCallback = nullptr;
         o_logCallback_sl1 = nullptr;
     }
+
+    unhookInterposerLogOnly();
+}
+
+void StreamlineHooks::unhookInterposerLogOnly()
+{
+    if (o_slInit_logOnly == nullptr && o_slInit_sl1_logOnly == nullptr)
+        return;
+
+    DetourTransactionBegin();
+    DetourUpdateThread(GetCurrentThread());
+
+    if (o_slInit_logOnly)
+        DetourDetach(&(PVOID&) o_slInit_logOnly, hkslInit_logOnly);
+
+    if (o_slInit_sl1_logOnly)
+        DetourDetach(&(PVOID&) o_slInit_sl1_logOnly, hkslInit_sl1_logOnly);
+
+    auto detourResult = DetourTransactionCommit();
+    if (detourResult != NO_ERROR)
+    {
+        LOG_ERROR("External FG: Streamline log capture detach error: {:X}", detourResult);
+        return;
+    }
+
+    o_slInit_logOnly = nullptr;
+    o_slInit_sl1_logOnly = nullptr;
+}
+
+// External FG: the game or the external unlocker owns Streamline and DLSS-G, so only slInit is detoured, and only to
+// redirect Streamline's log (FG-LSA-EXTERNAL-MFG-NO-FEATURE-CREATE.md). No tag, constants, evaluate, capability or
+// DLSS-G hook is installed here.
+void StreamlineHooks::hookInterposerLogOnly(HMODULE slInterposer)
+{
+    if (!slInterposer)
+        return;
+
+    // CheckModulesInMemory calls hookInterposer repeatedly in External mode (isInterposerHooked() stays false by
+    // design), so attach once per module.
+    static HMODULE last_logOnlyInterposer = nullptr;
+
+    if (last_logOnlyInterposer == slInterposer)
+        return;
+
+    last_logOnlyInterposer = slInterposer;
+
+    LOG_FUNC();
+
+    auto owner = State::GetOwner();
+    State::DisableChecks(owner, "sl.interposer");
+
+    unhookInterposerLogOnly();
+
+    char dllPath[MAX_PATH];
+    GetModuleFileNameA(slInterposer, dllPath, MAX_PATH);
+
+    // Local only: State::streamlineVersion stays untouched in External mode, because the system-caps spoof and the
+    // DLSS-G options interlock branch on it and their External-mode behaviour must not change.
+    version_t sl_version {};
+    Util::GetFileVersion(string_to_wstring(dllPath), &sl_version);
+
+    if (sl_version.major == 0)
+    {
+        LOG_WARN("External FG: unknown sl.interposer version, Streamline log not captured, path: {}", dllPath);
+        State::EnableChecks(owner);
+        return;
+    }
+
+    auto slInitAddress = KernelBaseProxy::GetProcAddress_()(slInterposer, "slInit");
+
+    if (slInitAddress == nullptr)
+    {
+        LOG_WARN("External FG: sl.interposer {}.{}.{} has no slInit export, Streamline log not captured",
+                 sl_version.major, sl_version.minor, sl_version.patch);
+        State::EnableChecks(owner);
+        return;
+    }
+
+    DetourTransactionBegin();
+    DetourUpdateThread(GetCurrentThread());
+
+    if (sl_version.major >= 2)
+    {
+        o_slInit_logOnly = reinterpret_cast<decltype(&slInit)>(slInitAddress);
+        DetourAttach(&(PVOID&) o_slInit_logOnly, hkslInit_logOnly);
+    }
+    else
+    {
+        o_slInit_sl1_logOnly = reinterpret_cast<decltype(&sl1::slInit)>(slInitAddress);
+        DetourAttach(&(PVOID&) o_slInit_sl1_logOnly, hkslInit_sl1_logOnly);
+    }
+
+    auto detourResult = DetourTransactionCommit();
+    if (detourResult != NO_ERROR)
+    {
+        LOG_ERROR("External FG: Streamline log capture attach error: {:X}", detourResult);
+        o_slInit_logOnly = nullptr;
+        o_slInit_sl1_logOnly = nullptr;
+    }
+    else
+    {
+        LOG_INFO("External FG: Streamline {}.{}.{} log capture only (no DLSS-G hooks), path: {}", sl_version.major,
+                 sl_version.minor, sl_version.patch, dllPath);
+    }
+
+    State::EnableChecks(owner);
 }
 
 // Call it just after sl.interposer's load or if sl.interposer is already loaded
@@ -2056,8 +2185,12 @@ void StreamlineHooks::hookInterposer(HMODULE slInterposer)
     // Seed INI intent before exposing the hooks. Later UI edits are staged
     // independently, so render callbacks do not read mutable menu config.
     initializeDlssgOptions();
-    if (State::Instance().externalFrameGeneration)
+    if (StreamlineLogPrefs::SelectHookSet(State::Instance().externalFrameGeneration) ==
+        StreamlineLogPrefs::InterposerHookSet::LogOnly)
+    {
+        hookInterposerLogOnly(slInterposer);
         return;
+    }
     LOG_FUNC();
 
     if (!slInterposer)

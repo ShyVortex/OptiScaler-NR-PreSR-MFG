@@ -3,6 +3,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
+#include <sstream>
+#include <string>
 
 // Lost Soul Aside never creates DLSS-G under the RTX 20/30 unlocker, and in External FG mode OptiScaler did not
 // capture Streamline's log, so the reason was invisible (FG-LSA-EXTERNAL-MFG-NO-FEATURE-CREATE.md). External mode
@@ -16,6 +19,9 @@
 // 4. A game without a callback leaves the saved callback null (nothing to chain).
 // 5. External FG selects the log-only hook set; otherwise the full set.
 // 6. Same rules on an SL1-shaped struct (different enum, callback and field layout).
+// 7. Production wiring (Streamline_Hooks.cpp): External mode routes to hookInterposerLogOnly before any full hook;
+//    the log-only attach detours only slInit, leaves State::streamlineVersion alone, and skips unknown versions; the
+//    log-only slInit hooks touch nothing but the logging fields; the full hooks use the same helper.
 
 namespace sl2
 {
@@ -194,6 +200,108 @@ static void Test6_Sl1Shape()
     std::printf("Test 6 done\n");
 }
 
+static std::string ReadSource(const char* path)
+{
+    std::ifstream in(path, std::ios::binary);
+    if (!in)
+        return {};
+    std::stringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+
+static size_t CountOf(const std::string& text, const std::string& needle)
+{
+    size_t count = 0;
+    for (size_t pos = text.find(needle); pos != std::string::npos; pos = text.find(needle, pos + needle.size()))
+        ++count;
+    return count;
+}
+
+// Body of the function whose definition starts with `signature`, up to the matching closing brace.
+static std::string FunctionBody(const std::string& source, const std::string& signature)
+{
+    const size_t start = source.find(signature);
+    if (start == std::string::npos)
+        return {};
+
+    const size_t open = source.find('{', start);
+    if (open == std::string::npos)
+        return {};
+
+    int depth = 0;
+    for (size_t i = open; i < source.size(); ++i)
+    {
+        if (source[i] == '{')
+            ++depth;
+        else if (source[i] == '}' && --depth == 0)
+            return source.substr(open, i - open + 1);
+    }
+
+    return {};
+}
+
+static void Test7_ProductionWiring()
+{
+    const std::string source = ReadSource("OptiScaler/hooks/Streamline_Hooks.cpp");
+    CHECK(!source.empty());
+    if (source.empty())
+    {
+        std::printf("Test 7 skipped: run from the repository root\n");
+        return;
+    }
+
+    const std::string hook = FunctionBody(source, "void StreamlineHooks::hookInterposer(HMODULE slInterposer)");
+    CHECK(!hook.empty());
+    const size_t route = hook.find("hookInterposerLogOnly(slInterposer);");
+    const size_t select = hook.find("StreamlineLogPrefs::SelectHookSet(State::Instance().externalFrameGeneration)");
+    const size_t firstFull = hook.find("DetourAttach");
+    CHECK(select != std::string::npos);
+    CHECK(route != std::string::npos);
+    CHECK(firstFull == std::string::npos || route < firstFull);
+    CHECK(hook.find("return;", route) != std::string::npos && hook.find("return;", route) < firstFull);
+
+    const std::string logOnly =
+        FunctionBody(source, "void StreamlineHooks::hookInterposerLogOnly(HMODULE slInterposer)");
+    CHECK(!logOnly.empty());
+    CHECK(CountOf(logOnly, "DetourAttach") == 2);
+    CHECK(logOnly.find("DetourAttach(&(PVOID&) o_slInit_logOnly, hkslInit_logOnly);") != std::string::npos);
+    CHECK(logOnly.find("DetourAttach(&(PVOID&) o_slInit_sl1_logOnly, hkslInit_sl1_logOnly);") != std::string::npos);
+    CHECK(logOnly.find("Instance().streamlineVersion") == std::string::npos);
+    CHECK(logOnly.find("streamlineVersion.major =") == std::string::npos);
+    CHECK(logOnly.find("sl_version.major == 0") != std::string::npos);
+    CHECK(logOnly.find("o_slInit =") == std::string::npos);
+    CHECK(logOnly.find("o_slInit_sl1 =") == std::string::npos);
+
+    for (const char* signature :
+         { "sl::Result StreamlineHooks::hkslInit_logOnly(const sl::Preferences& pref, uint64_t sdkVersion)",
+           "bool StreamlineHooks::hkslInit_sl1_logOnly(const sl1::Preferences& pref, int applicationId)" })
+    {
+        const std::string body = FunctionBody(source, signature);
+        CHECK(!body.empty());
+        CHECK(body.find("StreamlineLogPrefs::ApplyLogCapture(") != std::string::npos);
+        CHECK(body.find("pathsToPlugins") == std::string::npos);
+        CHECK(body.find("featuresToLoad") == std::string::npos);
+        CHECK(body.find("reportEngineType") == std::string::npos);
+        CHECK(body.find("gameQuirks") == std::string::npos);
+        CHECK(body.find("flags") == std::string::npos);
+    }
+
+    const std::string full =
+        FunctionBody(source, "sl::Result StreamlineHooks::hkslInit(const sl::Preferences& pref, uint64_t sdkVersion)");
+    const std::string full1 =
+        FunctionBody(source, "bool StreamlineHooks::hkslInit_sl1(const sl1::Preferences& pref, int applicationId)");
+    CHECK(full.find("StreamlineLogPrefs::ApplyLogCapture(") != std::string::npos);
+    CHECK(full1.find("StreamlineLogPrefs::ApplyLogCapture(") != std::string::npos);
+
+    const std::string unhook = FunctionBody(source, "void StreamlineHooks::unhookInterposer()");
+    CHECK(unhook.find("unhookInterposerLogOnly();") != std::string::npos);
+
+    const std::string interposerHooked = source.substr(source.find("bool StreamlineHooks::isInterposerHooked()"), 120);
+    CHECK(interposerHooked.find("logOnly") == std::string::npos);
+    std::printf("Test 7 done\n");
+}
+
 int main()
 {
     Test1_SetsLoggingAndSavesGameCallback();
@@ -202,6 +310,7 @@ int main()
     Test4_NoGameCallback();
     Test5_HookSetSelection();
     Test6_Sl1Shape();
+    Test7_ProductionWiring();
 
     if (g_failures != 0)
     {
@@ -209,6 +318,6 @@ int main()
         return 1;
     }
 
-    std::printf("All 6 tests passed\n");
+    std::printf("All 7 tests passed\n");
     return 0;
 }
