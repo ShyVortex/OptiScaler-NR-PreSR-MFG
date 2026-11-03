@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "SysUtils.h"
 #include <Util.h>
 #include <State.h>
@@ -92,7 +92,12 @@ class NtdllHooks
             }
         }
 
-        return o_LdrLoadDll(PathToFile, Flags, ModuleFileName, ModuleHandle);
+        const auto status = o_LdrLoadDll(PathToFile, Flags, ModuleFileName, ModuleHandle);
+
+        if (NT_SUCCESS(status))
+            LibraryLoadHooks::OnOriginalLoad(name, (HMODULE) *ModuleHandle);
+
+        return status;
     }
 
     static NTSTATUS NTAPI hkNtLoadDll(PUNICODE_STRING PathToFile, PULONG Flags, PUNICODE_STRING ModuleFileName,
@@ -153,7 +158,12 @@ class NtdllHooks
             }
         }
 
-        return o_NtLoadDll(PathToFile, Flags, ModuleFileName, ModuleHandle);
+        const auto status = o_NtLoadDll(PathToFile, Flags, ModuleFileName, ModuleHandle);
+
+        if (NT_SUCCESS(status))
+            LibraryLoadHooks::OnOriginalLoad(name, (HMODULE) *ModuleHandle);
+
+        return status;
     }
 
     static NTSTATUS NTAPI hkLdrUnloadDll(PVOID lpLibrary)

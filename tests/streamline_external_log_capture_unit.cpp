@@ -22,6 +22,11 @@
 // 7. Production wiring (Streamline_Hooks.cpp): External mode routes to hookInterposerLogOnly before any full hook;
 //    the log-only attach detours only slInit, leaves State::streamlineVersion alone, and skips unknown versions; the
 //    log-only slInit hooks touch nothing but the logging fields; the full hooks use the same helper.
+// 8. Load-time notification decision: only External FG + a successful load of sl.interposer.dll (any case, bare name
+//    or path) notifies; other modules, failed loads and non-External modes do not.
+// 9. Production wiring of the notification: both ntdll load hooks notify only after the original loader succeeded,
+//    OnOriginalLoad decides through the helper and does not set slInterposerModule, and the External skip in
+//    LoadLibraryCheckW still leaves every sl.* load to the original loader.
 
 namespace sl2
 {
@@ -302,6 +307,68 @@ static void Test7_ProductionWiring()
     std::printf("Test 7 done\n");
 }
 
+static void Test8_NotifyDecision()
+{
+    using StreamlineLogPrefs::ShouldNotifyInterposerLoad;
+
+    CHECK(ShouldNotifyInterposerLoad(true, L"sl.interposer.dll", true));
+    CHECK(ShouldNotifyInterposerLoad(true, L"SL.Interposer.DLL", true));
+    CHECK(ShouldNotifyInterposerLoad(
+        true, L"D:\\SteamLibrary\\Lost Soul Aside\\Engine\\Plugins\\Streamline\\sl.interposer.dll", true));
+    CHECK(ShouldNotifyInterposerLoad(true, L"D:/Game/Win64/sl.interposer.dll", true));
+
+    CHECK(!ShouldNotifyInterposerLoad(false, L"sl.interposer.dll", true)); // other modes keep their own path
+    CHECK(!ShouldNotifyInterposerLoad(true, L"sl.interposer.dll", false)); // failed load
+    CHECK(!ShouldNotifyInterposerLoad(true, L"sl.common.dll", true));
+    CHECK(!ShouldNotifyInterposerLoad(true, L"sl.dlss_g.dll", true));
+    CHECK(!ShouldNotifyInterposerLoad(true, L"sl.interposer.dll.bak", true));
+    CHECK(!ShouldNotifyInterposerLoad(true, L"xsl.interposer.dll", true));
+    CHECK(
+        !ShouldNotifyInterposerLoad(true, L"C:\\ProgramData\\NVIDIA\\NGX\\models\\sl_dlss_g_0\\190_E658703.dll", true));
+    CHECK(!ShouldNotifyInterposerLoad(true, L"", true));
+    std::printf("Test 8 done\n");
+}
+
+static void Test9_NotificationWiring()
+{
+    const std::string ntdll = ReadSource("OptiScaler/hooks/Ntdll_Hooks.h");
+    const std::string load = ReadSource("OptiScaler/hooks/LibraryLoad_Hooks.cpp");
+    CHECK(!ntdll.empty() && !load.empty());
+    if (ntdll.empty() || load.empty())
+    {
+        std::printf("Test 9 skipped: run from the repository root\n");
+        return;
+    }
+
+    for (const char* hook : { "static NTSTATUS NTAPI hkLdrLoadDll(", "static NTSTATUS NTAPI hkNtLoadDll(" })
+    {
+        const std::string body = FunctionBody(ntdll, hook);
+        CHECK(!body.empty());
+        const size_t original = body.rfind("const auto status = o_");
+        const size_t success = body.find("if (NT_SUCCESS(status))", original);
+        const size_t notify = body.find("LibraryLoadHooks::OnOriginalLoad(name, (HMODULE) *ModuleHandle);", success);
+        CHECK(original != std::string::npos);
+        CHECK(success != std::string::npos);
+        CHECK(notify != std::string::npos);
+        CHECK(CountOf(body, "OnOriginalLoad") == 1);
+    }
+
+    const std::string onLoad =
+        FunctionBody(load, "void LibraryLoadHooks::OnOriginalLoad(std::wstring_view name, HMODULE module)");
+    CHECK(!onLoad.empty());
+    CHECK(onLoad.find("StreamlineLogPrefs::ShouldNotifyInterposerLoad(State::Instance().externalFrameGeneration") !=
+          std::string::npos);
+    CHECK(onLoad.find("StreamlineHooks::hookInterposer(module);") != std::string::npos);
+    CHECK(onLoad.find("slInterposerModule =") == std::string::npos);
+    CHECK(onLoad.find("optiSlInterposer") != std::string::npos);
+
+    const std::string check =
+        FunctionBody(load, "HMODULE LibraryLoadHooks::LoadLibraryCheckW(std::wstring libName, LPCWSTR lpLibFullPath)");
+    CHECK(check.find("return nullptr; // not handled: preserve the original loader/unlocker's path") !=
+          std::string::npos);
+    std::printf("Test 9 done\n");
+}
+
 int main()
 {
     Test1_SetsLoggingAndSavesGameCallback();
@@ -311,6 +378,8 @@ int main()
     Test5_HookSetSelection();
     Test6_Sl1Shape();
     Test7_ProductionWiring();
+    Test8_NotifyDecision();
+    Test9_NotificationWiring();
 
     if (g_failures != 0)
     {
@@ -318,6 +387,6 @@ int main()
         return 1;
     }
 
-    std::printf("All 7 tests passed\n");
+    std::printf("All 9 tests passed\n");
     return 0;
 }

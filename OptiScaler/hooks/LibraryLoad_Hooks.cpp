@@ -30,6 +30,7 @@
 #include <hooks/Vulkan_Hooks.h>
 #include <hooks/Gdi32_Hooks.h>
 #include <hooks/Streamline_Hooks.h>
+#include <hooks/StreamlineLogPrefs.h>
 
 #include <fsr4/FSR4ModelSelection.h>
 #include <fsr4/FSR4Upgrade.h>
@@ -979,6 +980,24 @@ HMODULE LibraryLoadHooks::LoadNvngxDlss(std::wstring originalPath)
 //
 //     return nullptr;
 // }
+
+void LibraryLoadHooks::OnOriginalLoad(std::wstring_view name, HMODULE module)
+{
+    // External FG: the load itself stayed with the original loader (and the unlocker's hooks); only tell Streamline
+    // hooks the interposer exists, so the log-only slInit hook is in place before the game calls slInit
+    // (FG-LSA-EXTERNAL-MFG-NO-FEATURE-CREATE.md).
+    if (!StreamlineLogPrefs::ShouldNotifyInterposerLoad(State::Instance().externalFrameGeneration, name,
+                                                        module != nullptr))
+        return;
+
+    if (module == State::Instance().optiSlInterposer)
+        return;
+
+    // slInterposerModule is left to CheckModulesInMemory as before: Dxgi_Hooks delays factory calls from that module
+    // when factory wrapping is on, and that timing must not change in External mode.
+    LOG_DEBUG("External FG: sl.interposer.dll loaded by the original loader");
+    StreamlineHooks::hookInterposer(module);
+}
 
 void LibraryLoadHooks::CheckModulesInMemory()
 {
