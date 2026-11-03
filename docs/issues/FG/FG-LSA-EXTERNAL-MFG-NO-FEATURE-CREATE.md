@@ -122,6 +122,37 @@ The functional fix will be planned after the next run shows Streamline's reason.
 - The load itself is unchanged. `slInterposerModule` is still set by `CheckModulesInMemory`, because `Dxgi_Hooks`
   delays factory calls from that module when factory wrapping is on.
 
+## 5.3 Root Cause (confirmed in game, 2026-11-03)
+**The game's own XeSS Frame Generation takes over the swapchain, so Streamline's DLSS-G never sees a present and
+never creates feature 11.**
+
+- Lost Soul Aside ships XeSS-FG **1.1.0.19** (`Engine/Plugins/Runtime/Intel/XeSS/Binaries/ThirdParty/Win64`). On a
+  GeForce it fails to initialise and leaves the swapchain alone.
+- On the test machine DLSS Swapper had replaced it with **1.3.1.78**, keeping the original as
+  `libxess_fg.dll.dlsss` (it also swapped `libxess` 2.0.1.41 to 2.0.2.68 and `libxell` 1.1.0.6 to 1.3.2.10).
+  OptiScaler ships the same 1.3.1.78 build (identical SHA-256) and **preloads it at startup** from `OptiScaler/`
+  (`XeFGProxy::InitXeFG()` in `CheckMemoryForProxies`), even in External FG mode.
+- The game asks for `libxess_fg.dll` by name and gets the module already in the process: OptiScaler's preloaded
+  copy. The hang dump showed only `OptiScaler\libxess_fg.dll` loaded. 1.3.1 runs on NVIDIA, so the game's XeSS-FG
+  wraps the swapchain:
+  - `WrappedIDXGISwapChain4::QueryInterface` / `AddRef` from `libxess_fg.dll` 0.1 s after creation, held all session;
+  - `SetFullscreenState` from `libxess_fg.dll` at shutdown.
+- Streamline evidence from the `3f325df3` build, with only OptiScaler's copy renamed (the game's 1.3.1 still in
+  place):
+  - `sl.dlss_g` 2.14.16 registers its D3D12 swapchain and present hooks `OK`;
+  - the only later DLSS-G messages are `Repeated slDLSSGSetOptions() call for the frame 1`, 35 s into the session,
+    and one `slSetTag`;
+  - there is no `dlfgPresent` / `presentCommon` line, and no feature-11 create.
+- Removing the game's `libxess_fg.dll` makes the game crash at launch: its XeSS plugin needs the file.
+
+| Run (External mode, RTX 20/30 unlocker) | `libxess_fg` in process | Swapchain wrapped by XeSS-FG | `fg_gate_create_feature` 11 | DLSS-G present lines |
+|---|---|---|---|---|
+| OptiScaler 1.3.1 preloaded (game 1.3.1) | OptiScaler's 1.3.1 | yes | none | 0 |
+| OptiScaler copy renamed, game 1.3.1 | game's 1.3.1 | yes | none | 0 |
+| OptiScaler copy renamed, game **1.1.0.19** restored | game's 1.1 (only 3 factory probes) | **no** | **2 succeeded**, 11,040 evaluates, `multi_frame_count` 3 | 353 |
+
+The last run is the maintainer's in-game confirmation: DLSS MFG works.
+
 ## 6. Verification
 - [ ] `tests/streamline_external_log_capture_unit.cpp` passes; the existing `streamline_*` suites still pass.
 - [ ] In game: Lost Soul Aside shows Streamline log lines in `OptiScaler.log` with FG behaviour unchanged.
