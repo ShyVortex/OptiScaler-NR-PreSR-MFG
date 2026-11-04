@@ -153,10 +153,28 @@ never creates feature 11.**
 
 The last run is the maintainer's in-game confirmation: DLSS MFG works.
 
+## 5.4 Fix (awaiting in-game check)
+- **`44fb95cb`: no startup preload in External mode.** `CheckMemoryForProxies` skips `XeFGProxy::InitXeFG()` when
+  `externalFrameGeneration` is set (`XeFGPreloadPolicy`). OptiScaler's own XeFG and XeMFG never run there; the
+  game loads its own `libxess_fg`, or none. Test: `tests/xefg_external_preload_unit.cpp`.
+- **`f1513672`: the game's XeSS-FG is refused while the unlocker runs.** This covers game folders upgraded with DLSS
+  Swapper.
+  - Gate: External FG, `AmpereMfgUnlock` enabled and loaded, and `[DLSSG] AmpereMfgBlockGameXeFG` (`auto` = on).
+  - `GameXeFGHooks` detours the game library's `xefgSwapChainD3D12CreateContext` and returns
+    `XEFG_SWAPCHAIN_RESULT_ERROR_UNSUPPORTED_DEVICE` (-1) without calling it, which is what the Intel-only builds
+    answer on a GeForce.
+  - The hook is installed from `LibraryLoadHooks::OnOriginalLoad` (and `CheckModulesInMemory` for an
+    already-loaded library), never on OptiScaler's own copy, and never outside External mode, so architecture
+    rule 8 (XeMFG) is untouched.
+  - The menu has a "Keep game XeSS FG off the swapchain" checkbox and a status line once a context was refused.
+  - Test: `tests/game_xefg_block_unit.cpp`.
+
 ## 6. Verification
 - [ ] `tests/streamline_external_log_capture_unit.cpp` passes; the existing `streamline_*` suites still pass.
-- [ ] In game: Lost Soul Aside shows Streamline log lines in `OptiScaler.log` with FG behaviour unchanged.
-- [ ] Regression: TLOU2 still creates feature 11 and generates frames.
+- [x] In game: Lost Soul Aside shows Streamline log lines in `OptiScaler.log` (`3f325df3`; 193 lines).
+- [ ] In game: with OptiScaler's `libxess_fg.dll` back in place and the game's 1.3.1 (DLSS Swapper state), DLSS MFG
+  works and `OptiScaler.log` shows `refused the game's XeSS-FG context`.
+- [x] Regression: TLOU2 still creates feature 11 and generates frames (`4f53087c`). Re-check with the final build.
 
 ## 7. Open: Exit Hang With the Unlocker
 - SM86 run: the OptiScaler log ends at `hk_xessDestroyContext` (08:55:24), after the swapchain and DLSS were
