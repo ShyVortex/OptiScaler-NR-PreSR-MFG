@@ -369,6 +369,9 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClInclude Include="hooks\FG_Hooks.h" />
     <ClInclude Include="hooks\FgGpuTimeSource.h" />
     <ClInclude Include="hooks\Hook_Utils.h" />
+    <ClInclude Include="hooks\StreamlineLogPrefs.h" />
+    <ClInclude Include="hooks\GameXeFGBlockPolicy.h" />
+    <ClInclude Include="hooks\GameXeFG_Hooks.h" />
     <ClInclude Include="hooks\LibraryLoad_Hooks.h" />
     <ClInclude Include="hooks\CommandBuffer_StateTracker.h" />
     <ClInclude Include="framegen\nvngx\IFGNvngx.h" />
@@ -529,6 +532,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClInclude Include="proxies\Kernel32_Proxy.h" />
     <ClInclude Include="proxies\KernelBase_Proxy.h" />
     <ClInclude Include="proxies\XeFG_Proxy.h" />
+    <ClInclude Include="proxies\XeFGPreloadPolicy.h" />
     <ClInclude Include="proxies\XeLL_Proxy.h" />
     <ClInclude Include="proxies\Ntdll_Proxy.h" />
     <ClInclude Include="resource_tracking\ResTrack_dx12.h" />

@@ -15,6 +15,7 @@
 
 #include <proxies/XeSS_Proxy.h>
 #include <proxies/XeFG_Proxy.h>
+#include <proxies/XeFGPreloadPolicy.h>
 #include <proxies/XeLL_Proxy.h>
 #include <proxies/NVNGX_Proxy.h>
 #include <proxies/FfxApi_Proxy.h>
@@ -1728,7 +1729,13 @@ void CheckMemoryForProxies()
 
     XeSSProxy::InitXeSS();
     XeSSProxy::InitXeSSDx11();
-    XeFGProxy::InitXeFG();
+
+    // External FG: never preload OptiScaler's libxess_fg.dll, so the game keeps its own copy (or none)
+    if (XeFGPreloadPolicy::ShouldPreloadAtStartup(State::Instance().externalFrameGeneration))
+        XeFGProxy::InitXeFG();
+    else
+        LOG_INFO("External FG: not preloading libxess_fg.dll; the game keeps its own XeSS-FG library");
+
     XeLLProxy::InitXeLL();
 
     XellHooks::Hook();

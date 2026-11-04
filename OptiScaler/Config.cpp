@@ -114,6 +114,7 @@ bool Config::Reload(std::filesystem::path iniPath)
                     FGDLSSGAmpereMfgRouter.set_from_config("Auto");
             }
             FGDLSSGAmpereMfgHardwareBilinear.set_from_config(readBool("DLSSG", "AmpereMfgHardwareBilinear"));
+            FGDLSSGAmpereMfgBlockGameXeFG.set_from_config(readBool("DLSSG", "AmpereMfgBlockGameXeFG"));
             if (auto intOpt = readInt("DLSSG", "AmpereMfgOptimized"); intOpt.has_value())
                 FGDLSSGAmpereMfgOptimized.set_from_config(intOpt.value());
             else if (auto boolOpt = readBool("DLSSG", "AmpereMfgOptimized"); boolOpt.has_value())
@@ -1240,6 +1241,8 @@ bool Config::SaveIni(std::filesystem::path destination)
                      Instance()->FGDLSSGAmpereMfgLinuxFsrFallback.value_for_config_or("auto").c_str());
         ini.SetValue("DLSSG", "AmpereMfgLinuxFallbackType",
                      Instance()->FGDLSSGAmpereMfgLinuxFallbackType.value_for_config_or("fsrfg").c_str());
+        ini.SetValue("DLSSG", "AmpereMfgBlockGameXeFG",
+                     GetBoolValue(Instance()->FGDLSSGAmpereMfgBlockGameXeFG.value_for_config()).c_str());
         ini.SetValue("DLSSG", "SmoothMotion", GetBoolValue(Instance()->FGDLSSGSmoothMotion.value_for_config()).c_str());
         ini.Delete("DLSSG", "AmpereMfgSmoothMotion");
         ini.SetValue("SmoothMotion", "EnableNVSmooth30",

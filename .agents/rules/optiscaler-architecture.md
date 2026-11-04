@@ -38,6 +38,18 @@ description: Architecture, frame generation, and safety rules for OptiScaler
         - `hkdlssg_slOnPluginLoad`: `shouldSpoofArch` must include `ampereMfgActive` so `sl.dlss_g.dll` is spoofed during plugin load even when `activeFgInput == NoFG`.
         - **Never clear the game's DLSS-G hooks for the external unlocker**: the `hooks` / `exclusive_hooks` / `external/feature/tags` clearing in `hkdlssg_slOnPluginLoad` runs only when OptiScaler owns DLSS-G (`activeFgInput == FGInput::DLSSG || activeFgOutput == FGOutput::DLSSG`), never for `ampereMfgActive` alone. With the external unlocker the game's own DLSS-G presents the generated frames and needs those hooks and tags (`2a0dbf5e` added the unlocker to the clearing; reverted in `b30c2433`, DLSS Unlocked #58). The arch spoof, capability hooks and vsync/HWS relaxation still cover the unlocker.
         - Documentation: `docs/issues/FG/FG-WRC-GENERATIONS-EXTERNAL-MFG.md`. Associated test: `tests/streamline_dlssg_hook_ownership_unit.cpp`.
+      - **Game XeSS-FG Must Not Take the Swapchain From the External Unlocker (verified in-game, Lost Soul Aside + TLOU2)**:
+        - A cross-vendor `libxess_fg.dll` (1.3.x: OptiScaler's own copy, or a game file upgraded with DLSS Swapper) lets a game's XeSS-FG create a context on a GeForce and wrap the swapchain. Streamline's DLSS-G then never sees a present and creates no feature 11. Games ship Intel-only builds (Lost Soul Aside: 1.1.0.19) that refuse GeForce.
+        - In External FG mode, `CheckMemoryForProxies` (`dllmain.cpp`) must never preload OptiScaler's `libxess_fg.dll` (`OptiScaler/proxies/XeFGPreloadPolicy.h`): a game asking for it by name would get that module. OptiScaler's XeFG and XeMFG never run in External mode. The other modes keep the preload, so rule §8 is untouched.
+        - With External FG + `AmpereMfgUnlock` loaded + `[DLSSG] AmpereMfgBlockGameXeFG` (`auto` = on), `GameXeFGHooks` (`OptiScaler/hooks/GameXeFG_Hooks.h`, gate in `GameXeFGBlockPolicy.h`) detours the game library's `xefgSwapChainD3D12CreateContext`:
+          - it returns `XEFG_SWAPCHAIN_RESULT_ERROR_UNSUPPORTED_DEVICE` (-1) without calling the original, as Intel-only builds do on GeForce;
+          - it is installed from `LibraryLoadHooks::OnOriginalLoad` and `CheckModulesInMemory`, never on OptiScaler's own copy.
+          - Never remove the gate or make it apply outside External mode. The menu checkbox "Keep game XeSS FG off the swapchain" is the user's opt-out.
+        - **External-mode Streamline log capture**:
+          - `hookInterposer` installs only a log-only `slInit` hook (`hkslInit_logOnly` / `hkslInit_sl1_logOnly`, `OptiScaler/hooks/StreamlineLogPrefs.h`). It touches only `logLevel` / `logMessageCallback`: never plugin paths, features, engine or flags.
+          - It is attached right after the original loader loads `sl.interposer.dll` (`NtdllHooks` → `LibraryLoadHooks::OnOriginalLoad`). The External-mode skip of `sl.*` loads in `LoadLibraryCheckW` stays.
+          - `State::streamlineVersion` and `slInterposerModule` are not set early in External mode.
+        - Documentation: `docs/issues/FG/FG-LSA-EXTERNAL-MFG-NO-FEATURE-CREATE.md`. Associated tests: `tests/game_xefg_block_unit.cpp`, `tests/xefg_external_preload_unit.cpp`, `tests/streamline_external_log_capture_unit.cpp`.
       - **Dual Runtime Architecture & Turing Router Safety (`AmpereMfgLoader.h`, `AmpereMfgLoader.cpp`)**:
         - Prioritize `310.1` runtime folder (`dlssg_sm86/310.1/dlssg_sm86.dll`) on Turing cards for native SM75 kernels (`DLSSG_SM75_SLOTS`).
         - When running on 310.9 runtime, `ResolveRouter` must output `Router=Auto` on Turing (never `Router=SM75`) to avoid runtime backend abort.
@@ -52,6 +64,9 @@ description: Architecture, frame generation, and safety rules for OptiScaler
         - `tests/turing_menu_recognition_unit.cpp`
         - `tests/streamline_turing_spoof_unit.cpp`
         - `tests/streamline_dlssg_hook_ownership_unit.cpp`
+        - `tests/game_xefg_block_unit.cpp`
+        - `tests/xefg_external_preload_unit.cpp`
+        - `tests/streamline_external_log_capture_unit.cpp`
         - `tests/turing_dual_runtime_unit.cpp`
         - `tests/dlssg_sm86_v030_ini_unit.cpp`
    - Always preserve **Ada (RTX 40) MFG Unlocker**:

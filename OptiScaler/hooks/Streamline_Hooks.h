@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "SysUtils.h"
 
 #include <sl.h>
@@ -214,6 +214,15 @@ class StreamlineHooks
     inline static sl::PFun_LogMessageCallback* o_logCallback = nullptr;
     inline static sl1::pfunLogMessageCallback* o_logCallback_sl1 = nullptr;
 
+    // External FG: log capture only (FG-LSA-EXTERNAL-MFG-NO-FEATURE-CREATE.md). Separate from o_slInit /
+    // o_slInit_sl1 so isInterposerHooked() and the full hook set never see them.
+    inline static decltype(&slInit) o_slInit_logOnly = nullptr;
+    inline static decltype(&sl1::slInit) o_slInit_sl1_logOnly = nullptr;
+    static void hookInterposerLogOnly(HMODULE slInterposer);
+    static void unhookInterposerLogOnly();
+    static sl::Result hkslInit_logOnly(const sl::Preferences& pref, uint64_t sdkVersion);
+    static bool hkslInit_sl1_logOnly(const sl1::Preferences& pref, int applicationId);
+
     static sl::Result hkslInit(const sl::Preferences& pref, uint64_t sdkVersion);
     static sl::Result hkslIsFeatureSupported(sl::Feature feature, const sl::AdapterInfo& adapterInfo);
     static sl::Result hkslIsFeatureLoaded(sl::Feature feature, bool& loaded);
@@ -323,6 +332,8 @@ class StreamlineHooks
     // Function signature checking
     VALIDATE_MEMBER_HOOK(hkslInit, decltype(&slInit))
     VALIDATE_MEMBER_HOOK(hkslInit_sl1, decltype(&sl1::slInit))
+    VALIDATE_MEMBER_HOOK(hkslInit_logOnly, decltype(&slInit))
+    VALIDATE_MEMBER_HOOK(hkslInit_sl1_logOnly, decltype(&sl1::slInit))
     VALIDATE_MEMBER_HOOK(hkslSetTag_sl1, decltype(&sl1::slSetTag))
     VALIDATE_MEMBER_HOOK(hkslSetConstants_sl1, decltype(&sl1::slSetConstants))
     VALIDATE_MEMBER_HOOK(hkslEvaluateFeature_sl1, decltype(&sl1::slEvaluateFeature))
