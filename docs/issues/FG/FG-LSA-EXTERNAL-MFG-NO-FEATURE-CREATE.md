@@ -153,7 +153,7 @@ never creates feature 11.**
 
 The last run is the maintainer's in-game confirmation: DLSS MFG works.
 
-## 5.4 Fix (awaiting in-game check)
+## 5.4 Fix (confirmed in game, 2026-11-04)
 - **`44fb95cb`: no startup preload in External mode.** `CheckMemoryForProxies` skips `XeFGProxy::InitXeFG()` when
   `externalFrameGeneration` is set (`XeFGPreloadPolicy`). OptiScaler's own XeFG and XeMFG never run there; the
   game loads its own `libxess_fg`, or none. Test: `tests/xefg_external_preload_unit.cpp`.
@@ -172,9 +172,10 @@ The last run is the maintainer's in-game confirmation: DLSS MFG works.
 ## 6. Verification
 - [ ] `tests/streamline_external_log_capture_unit.cpp` passes; the existing `streamline_*` suites still pass.
 - [x] In game: Lost Soul Aside shows Streamline log lines in `OptiScaler.log` (`3f325df3`; 193 lines).
-- [ ] In game: with OptiScaler's `libxess_fg.dll` back in place and the game's 1.3.1 (DLSS Swapper state), DLSS MFG
-  works and `OptiScaler.log` shows `refused the game's XeSS-FG context`.
-- [x] Regression: TLOU2 still creates feature 11 and generates frames (`4f53087c`). Re-check with the final build.
+- [x] In game (build `85a25596`, CI run 41803622205): OptiScaler's `libxess_fg.dll` restored, and the game's
+  `libxess_fg.dll` upgraded to 1.3.1 again with DLSS Swapper. DLSS MFG works correctly. Confirmed by the maintainer
+  on 2026-11-04.
+- [x] Regression: TLOU2 FG works with the final build `85a25596` (maintainer, 2026-11-04).
 
 ## 7. Open: Exit Hang With the Unlocker
 - SM86 run: the OptiScaler log ends at `hk_xessDestroyContext` (08:55:24), after the swapchain and DLSS were
