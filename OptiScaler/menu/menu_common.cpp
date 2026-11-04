@@ -50,6 +50,7 @@
 #include <type_traits>
 #include <misc/IdentifyGpu.h>
 #include <hooks/Xell_Hooks.h>
+#include <hooks/GameXeFG_Hooks.h>
 #include <low_latency/input/input_common.h>
 
 enum class UiTargetMode
@@ -3452,7 +3453,23 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                                        AmpereMfgStatusText::DriverFloorText(primaryGpu.nvidiaDriverVersion).c_str());
                     ImGui::PopStyleColor();
                 }
+                if (GameXeFGHooks::BlockedCount() > 0)
+                {
+                    ImGui::TextWrapped("Game XeSS Frame Generation kept off the swapchain (DLSS-G owns it)");
+                    ShowHelpMarker("The game's own XeSS-FG library can run on GeForce cards (for example after a DLSS "
+                                   "Swapper upgrade) and would take the swapchain, leaving DLSS-G without frames.\n"
+                                   "OptiScaler answers its context request with 'unsupported device', as the "
+                                   "Intel-only builds do on GeForce.");
+                }
             }
+
+            bool blockGameXeFG = config->FGDLSSGAmpereMfgBlockGameXeFG.value_or_default();
+            if (ImGui::Checkbox("Keep game XeSS FG off the swapchain##sm86", &blockGameXeFG))
+                config->FGDLSSGAmpereMfgBlockGameXeFG = blockGameXeFG;
+            ShowHelpMarker("External mode only. Stops the game's own XeSS Frame Generation from taking the swapchain "
+                           "from DLSS-G (it happens with a cross-vendor libxess_fg.dll, e.g. after a DLSS Swapper "
+                           "upgrade). Turn off only if you want the game's XeSS FG instead of DLSS-G.\n"
+                           "Save Settings and restart to apply.");
 
             // Ampere MFG Mode combo (External / Internal)
             const char* ampereModeOptions[] = { "External (game controls MFG)",

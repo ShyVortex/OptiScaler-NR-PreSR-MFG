@@ -31,6 +31,7 @@
 #include <hooks/Gdi32_Hooks.h>
 #include <hooks/Streamline_Hooks.h>
 #include <hooks/StreamlineLogPrefs.h>
+#include <hooks/GameXeFG_Hooks.h>
 
 #include <fsr4/FSR4ModelSelection.h>
 #include <fsr4/FSR4Upgrade.h>
@@ -983,6 +984,9 @@ HMODULE LibraryLoadHooks::LoadNvngxDlss(std::wstring originalPath)
 
 void LibraryLoadHooks::OnOriginalLoad(std::wstring_view name, HMODULE module)
 {
+    // External FG + RTX 20/30 unlocker: the game's own XeSS-FG must not take the swapchain from DLSS-G
+    GameXeFGHooks::OnLibraryLoaded(name, module);
+
     // External FG: the load itself stayed with the original loader (and the unlocker's hooks); only tell Streamline
     // hooks the interposer exists, so the log-only slInit hook is in place before the game calls slInit
     // (FG-LSA-EXTERNAL-MFG-NO-FEATURE-CREATE.md).
@@ -1001,6 +1005,16 @@ void LibraryLoadHooks::OnOriginalLoad(std::wstring_view name, HMODULE module)
 
 void LibraryLoadHooks::CheckModulesInMemory()
 {
+    // An XeSS-FG library loaded before the hooks (or by a path the load hooks did not see)
+    if (State::Instance().externalFrameGeneration)
+    {
+        for (const wchar_t* xefgName : { L"libxess_fg.dll", L"igxess_fg.dll" })
+        {
+            if (HMODULE xefgModule = GetModuleHandleW(xefgName); xefgModule != nullptr)
+                GameXeFGHooks::OnLibraryLoaded(xefgName, xefgModule);
+        }
+    }
+
     if (!StreamlineHooks::isInterposerHooked())
     {
         // hook streamline right away if it's already loaded

@@ -584,6 +584,12 @@
     <ClInclude Include="hooks\StreamlineLogPrefs.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="hooks\GameXeFGBlockPolicy.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="hooks\GameXeFG_Hooks.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="hooks\FG_Hooks.h">
       <Filter>Header Files</Filter>
     </ClInclude>

@@ -696,6 +696,9 @@ class Config
     }; // dlssg_sm86 logging level: 0=Off, 1=Default/Info, 2=Debug, 3=Trace/Verbose
     CustomOptional<std::string, NoDefault> FGDLSSGAmpereMfgLinuxFsrFallback; // Linux fallback mode: auto / true / false
     CustomOptional<std::string, NoDefault> FGDLSSGAmpereMfgLinuxFallbackType; // Target pipeline: fsrfg / xefg
+    // External FG + RTX 20/30 unlocker: refuse the game's own XeSS-FG context so it cannot take the swapchain from
+    // DLSS-G (FG-LSA-EXTERNAL-MFG-NO-FEATURE-CREATE.md). auto = on.
+    CustomOptional<bool> FGDLSSGAmpereMfgBlockGameXeFG { true };
     CustomOptional<bool> FGDLSSGSmoothMotion {
         false
     }; // NVIDIA Smooth Motion pacing/interpolation via DRS (strictly opt-in, default false)
