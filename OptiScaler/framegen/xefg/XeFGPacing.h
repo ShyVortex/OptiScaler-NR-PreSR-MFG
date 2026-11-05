@@ -15,6 +15,7 @@
 #include <format>
 #include "Logger.h"
 #include "SysUtils.h"
+#include "XeFGPacingPolicy.h"
 
 namespace XeFGPacing
 {
@@ -287,16 +288,13 @@ inline void NoteFrame(uint64_t index, uint64_t count, int64_t nowQpc)
 
     if (g_lastBurstQpc != 0)
     {
-        const int64_t totalDeltaNs = NsFromQpc(nowQpc - g_lastBurstQpc);
+        // The recorded wait is subtracted BEFORE median filtering, so g_renderTimeNs is the unblocked engine render
+        // + GPU interpolation time and never feeds the provider's own wait back to it.
+        const int64_t pureNs =
+            XeFGPacingPolicy::PureRenderNs(NsFromQpc(nowQpc - g_lastBurstQpc), NsFromQpc(g_burstBlockQpc));
 
-        if (totalDeltaNs >= 1000000LL && totalDeltaNs <= 500000000LL)
+        if (pureNs > 0)
         {
-            const int64_t blockNs = NsFromQpc(g_burstBlockQpc);
-
-            // Subtract presentation wait duration from total burst delta BEFORE median filtering
-            // so g_renderTimeNs reflects pure unblocked engine render + GPU interpolation time,
-            // completely eliminating the self-referential wait inflation feedback loop.
-            const int64_t pureNs = (totalDeltaNs > blockNs + 2000000LL) ? (totalDeltaNs - blockNs) : 2000000LL;
             PushPeriod(pureNs);
             g_renderTimeNs = g_periodNs;
         }
@@ -502,7 +500,17 @@ inline void TryPace(void* ctx, void* arg5, void* arg6, uint64_t arg7, bool isLas
     if (g_schedNative != nullptr && SchedulerUsable(ctx))
     {
         if (!isLast)
+        {
             ScheduleFrame(ctx, burst, index);
+        }
+        else if (XeFGPacingPolicy::MeasureOnlyLastFrame(true, isLast, index))
+        {
+            // 2X: the only generated frame is the last one. Measure the burst here (no wait, the provider already
+            // scheduled it), otherwise the render time is never sampled at 2X.
+            LARGE_INTEGER now;
+            QueryPerformanceCounter(&now);
+            NoteFrame(index, count, now.QuadPart);
+        }
 
         return;
     }
