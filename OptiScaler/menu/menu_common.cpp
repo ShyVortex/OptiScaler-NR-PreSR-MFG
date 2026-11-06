@@ -4276,6 +4276,10 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             {
                 ImGui::TextDisabled("Disabled in config");
             }
+            else if (nvSmoothStatus.WaitingForDxgiHooks)
+            {
+                ImGui::TextDisabled("Waiting for OptiScaler's DXGI hooks");
+            }
             else if (!nvSmoothStatus.DllFound)
             {
                 ImGui::TextColored(ImVec4(0.9f, 0.6f, 0.2f, 1.0f), "OptiScaler/nvsmooth30.dll not found");

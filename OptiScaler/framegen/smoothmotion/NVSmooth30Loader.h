@@ -15,6 +15,7 @@ struct Status
     bool SwapchainAttached = false;     // NvPresent64.dll detected on the current DXGI swapchain
     bool LoadedBeforeSwapchain = false; // nvsmooth30.dll was loaded before the current swapchain was created
     bool ProbeDone = false;             // The attachment probe window of the current swapchain has closed
+    bool WaitingForDxgiHooks = false;   // Setup deferred until OptiScaler's DXGI factory hooks are installed
     int SwapchainId = 0;                // OptiScaler id of the current (most recently created) swapchain
     std::wstring LoadedDllPath;         // Absolute path of loaded DLL
     std::string ErrorMessage;           // Human-readable error if anything failed
@@ -37,6 +38,24 @@ void SetSwapchainAttached(int swapchainId);
 
 /// Records that the probe window of the swapchain closed. Ignored for a swapchain that is no longer current.
 void SetProbeDone(int swapchainId);
+
+/// nvsmooth30.dll creates a 16x16 D3D11 swapchain at load to patch the shared DXGI Present slots. OptiScaler rejects it
+/// in its DXGI factory hooks (DxgiFactory_Hooks.cpp), so the DLL may only load once those hooks are installed.
+enum class LoadGate
+{
+    Load,
+    WaitForDxgiHooks
+};
+constexpr LoadGate DecideLoadGate(bool dxgiFactoryHooksInstalled)
+{
+    return dxgiFactoryHooksInstalled ? LoadGate::Load : LoadGate::WaitForDxgiHooks;
+}
+
+/// True while a setup is deferred until the DXGI factory hooks are installed (cheap, lock-free).
+bool PendingDxgiHooks();
+
+/// Runs a deferred setup. Called from OptiScaler's CreateDXGIFactory* hooks, which run on game calls only.
+void RunPendingSetup();
 
 /// Whether NVSmooth30's SM86_DIAGNOSTICS logging is turned on for an OptiScaler log level (0 = Trace, 1 = Debug).
 /// It only adds log lines in nvsmooth30.log (e.g. CUDA kernel loads it left unmodified).

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "SysUtils.h"
 
 class DxgiHooks
@@ -8,4 +8,7 @@ class DxgiHooks
 
   public:
     static void Hook();
+
+    /// True once CreateDXGIFactory, CreateDXGIFactory1 and CreateDXGIFactory2 are hooked.
+    static bool FactoryHooksInstalled();
 };
