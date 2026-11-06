@@ -11,7 +11,8 @@
     the D3D11 game is on DXVK and XeFG on vkd3d-proton.
   - OptiScaler v0.9.87-pre4 (`6961c56`), LogLevel 0, `OverlayMenu=auto`.
   - `[XeMFG] UnlockMFG=true`, `Source=OptiScaler`, 4X.
-- **Status**: two defects found; fixes on `fix/linux-vk-overlay-resize-freeze` (section 5).
+- **Status**: two defects fixed on `fix/linux-vk-overlay-resize-freeze` (section 5) and confirmed in game (section 6).
+  - A third cause still makes F11 hang the game after a few switches (4.2); it is open, to be handled separately.
   - The overlay fix is verified in game: no more GPU fault on F11.
   - The per-thread flag (4.1) still needs a retest.
 
@@ -106,6 +107,39 @@ Cause: `State::vulkanCreatingSC` was a process-wide flag.
 - The flag dates from `03126e4c`; it was not introduced by the overlay fix.
 - The 44 s hang is attributed to the same cause, but without thread stacks this is not proven.
 
+### 4.2 Remaining hang after several F11 switches (open)
+
+With both fixes (v0.9.87-pre6) the game's swapchain is wrapped again after F11. After a few quick F11 presses it still
+hangs, also with `OverlayMenu=false`, so the Vulkan overlay is not involved. No NVIDIA Xid is logged.
+
+The last frame in `OptiScaler.log` enters `LocalPresent` and never returns from the real `IDXGISwapChain::Present`.
+`FGHooks::FGPresent` holds `FG->Mutex` at that point. Just before, a Vulkan present returned
+`VK_ERROR_OUT_OF_DATE_KHR`, and no swapchain is recreated afterwards.
+
+Windows-side backtraces, from `winedbg` of the game's own Proton build:
+
+```
+WINEPREFIX=~/.local/share/Steam/steamapps/compatdata/286690/pfx \
+  "<Proton-CachyOS>/files/bin/wine" winedbg --command "bt all" 0x<metro.exe wpid>
+```
+
+(`protontricks` failed with a Wine version mismatch; `eu-stack` cannot unwind the Windows modules.)
+
+| Thread | Stack (innermost last) | Waits on |
+|---|---|---|
+| game (0154) | `metro` → OptiScaler `dxgi` (+0x136833, +0xa52d0, +0xa60e1) → `libxess_fg+0x20c9ed` → `dxgi+0xa538f` → `libxess_fg+0x20bdef` → `libxess_fg+0x220ca6` | XeFG |
+| XeFG present (0378) | `libxess_fg+0x21c496` → `+0x2202ed` (paced present call) → `dxgi+0x14f70d` (pacing detour) → `libxess_fg+0x21f965` (native present) → `dxgi` (+0x24e000, +0x24b811, +0x8775e) → `d3d12core+0x4bb9cf` | vkd3d-proton `Present` |
+| vkd3d-proton present worker (0370) | `d3d12core+0x475adb` → … → `d3d12core+0x4c07c8` → `winevulkan+0x1cd1e` | inside a Vulkan call |
+
+Suspected cause, not proven:
+- `Dx11wDx12SC::Present` (upstream `3fc6c8c3`) presents two swapchains to the same window every frame: the game's hidden
+  D3D11 swapchain (`_real->Present(0, ...)`, on DXVK) and XeFG's D3D12 swapchain (on vkd3d-proton). The log shows both
+  Vulkan swapchains presenting in alternation.
+- On Windows DXGI copes with that. On Linux they are two Vulkan swapchains on one native window, which Vulkan does not
+  allow.
+- After F11 both go out of date, and vkd3d-proton's present does not return.
+- Changing this needs its own investigation: the hidden present may keep the D3D11 back-buffer index advancing.
+
 ## 5. Planned Solution
 
 On `fix/linux-vk-overlay-resize-freeze`:
@@ -137,8 +171,9 @@ v0.9.87-pre5 (overlay fix only), Metro 2033 Redux, Linux, maintainer:
 - No new NVIDIA Xid in the kernel log.
 - The fullscreen problem and the later hang come from 4.1.
 
-Still to check, with the per-thread flag: Metro 2033 Redux with XeMFG and `OverlayMenu=auto`.
-- F11 and alt-tab several times, with the menu open and closed.
-- After every switch the swapchain is wrapped again: `Dx11wDx12SC ... created` and `XeFG swapchain created`, never
-  `Vulkan is creating swapchain!` for the game's own swapchain.
-- Fullscreen can be left again, FG keeps running (`4X` pacing reports), and the menu still renders and takes input.
+v0.9.87-pre6 (both fixes), same setup:
+- After F11 the game's swapchain is wrapped again: `Dx11wDx12SC 2 created`, a new XeFG context and swapchain, no
+  `Vulkan is creating swapchain!`.
+- No Xid.
+- After a few quick F11 presses the game still hangs, with and without the overlay menu. That is 4.2, which remains
+  open.
