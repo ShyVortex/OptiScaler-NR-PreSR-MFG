@@ -221,6 +221,9 @@ On `fix/fps-limiter-xemfg`, one task per commit:
      context.
    - XeFG initialises XeLL with the current limit, not 0.
    - Per-instance cache in `XeLL::set_sleep_mode`.
+   - With no OptiScaler limit (0), the game's own Reflex `minimumIntervalUs` is sent instead of 0, so a reset or a
+     resend never wipes a cap the game set itself.
+   - `XeFG_Dx12::Present` feeds the limit to `XeFGPacing::SetOutputCapFps` (0 in External FG mode).
 4. **Fallback limiter multiplier.** `FrameLimit::sleep` takes the real output multiplier.
 5. **External FG mode.**
    - No limiter sleep in `Present`, `Present1` or the Vulkan hook.

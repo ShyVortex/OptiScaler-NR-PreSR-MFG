@@ -1,0 +1,54 @@
+﻿#pragma once
+
+// Pure decisions behind ReflexHooks' FPS limit delivery, kept free of Windows headers so unit tests can include them.
+// See docs/issues/FG/FG-FPS-LIMIT-XEMFG-PACING-AND-SYNC.md, section 4.2.
+
+#include <cstdint>
+
+namespace FpsLimitSync
+{
+// Where the game's D3D Reflex calls go: the driver, or fakenvapi (whose low-latency tech is XeLL, forced by XeFG)
+// while XeFG is active.
+enum class Backend : uint8_t
+{
+    None, // nothing received the limit yet (no Reflex device seen)
+    Driver,
+    Fakenvapi,
+};
+
+// The backend and low-latency context generation that last received the limit.
+struct Pushed
+{
+    Backend backend = Backend::None;
+    uint32_t generation = 0;
+};
+
+constexpr Backend Route(bool xefgActive) { return xefgActive ? Backend::Fakenvapi : Backend::Driver; }
+
+// A limit sent to one backend does not reach the other, and a new XeLL context starts without it. Resend when the
+// route moved or the context changed since the last delivery. Without a Reflex device nothing can be sent.
+constexpr bool NeedsResend(const Pushed& last, Backend route, uint32_t generation, bool hasDevice)
+{
+    if (!hasDevice)
+        return false;
+
+    return last.backend != route || last.generation != generation;
+}
+
+// minimumIntervalUs to send: OptiScaler's limit when one is set, otherwise the game's own Reflex interval, so turning
+// OptiScaler's limit off (or resending it as 0) never wipes a cap the game set itself.
+constexpr uint32_t IntervalToSend(uint32_t optiIntervalUs, uint32_t gameIntervalUs)
+{
+    return optiIntervalUs != 0 ? optiIntervalUs : gameIntervalUs;
+}
+
+// Output cap the XeFG pacing engine spaces generated frames by. The limit counts presented frames, generated ones
+// included. External FG mode never runs OptiScaler's XeFG and never applies the limit.
+constexpr double OutputCapFps(float limitFps, bool externalFrameGeneration)
+{
+    if (externalFrameGeneration || !(limitFps > 0.0f))
+        return 0.0;
+
+    return static_cast<double>(limitFps);
+}
+} // namespace FpsLimitSync

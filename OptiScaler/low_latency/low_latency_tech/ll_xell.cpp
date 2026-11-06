@@ -134,10 +134,6 @@ void XeLL::set_sleep_mode(SleepMode* sleep_mode)
     xell_sleep_params.minimumIntervalUs = sleep_mode->minimum_interval_us;
     xell_sleep_params.bLowLatencyBoost = sleep_mode->low_latency_boost;
 
-    static uint32_t last_bLowLatencyMode = 0;
-    static uint32_t last_minimumIntervalUs = 0;
-    static uint32_t last_bLowLatencyBoost = 0;
-
     // With ForceXeLL we have FG enabled but not actually working
     // but their FPS limit thinks that the FG is working
     if (Config::Instance()->ForceXeLL.value_or_default())

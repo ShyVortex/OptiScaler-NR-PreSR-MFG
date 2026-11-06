@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "low_latency_tech.h"
 
@@ -13,6 +13,12 @@ class XeLL : public LowLatencyTech
     uint64_t sleep_last_id {};
 
     xell_context_handle_t xell_context {};
+
+    // Last sleep mode sent to this context. Per instance: a new context must always get its first set_sleep_mode
+    // (FG-FPS-LIMIT-XEMFG-PACING-AND-SYNC.md, section 4.2), so the initial values never match a real one.
+    uint32_t last_bLowLatencyMode = ~0u;
+    uint32_t last_minimumIntervalUs = ~0u;
+    uint32_t last_bLowLatencyBoost = ~0u;
 
     decltype(&xellDestroyContext) o_xellDestroyContext = nullptr;
     decltype(&xellSetSleepMode) o_xellSetSleepMode = nullptr;

@@ -590,6 +590,9 @@
     <ClInclude Include="hooks\GameXeFGBlockPolicy.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="hooks\FpsLimitSync.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="hooks\GameXeFG_Hooks.h">
       <Filter>Header Files</Filter>
     </ClInclude>
