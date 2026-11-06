@@ -51,4 +51,18 @@ constexpr double OutputCapFps(float limitFps, bool externalFrameGeneration)
 
     return static_cast<double>(limitFps);
 }
+
+// Whether a latency marker means the game turned DLSS-G off: some games stop sending async (out-of-band) markers when
+// it is disabled. A game that never sent one has nothing that stopped, but the old check fired on every marker there.
+// The generated-frame count then flips 3 -> 0 -> 3 (seen about twice a second in Lost Soul Aside), resending the limit
+// each time and, with fakenvapi as the main nvapi, reloading low latency and forcing Reflex off
+// (FG-FPS-LIMIT-XEMFG-PACING-AND-SYNC.md, section 4.5).
+// Streamline SetOptions, NGX evaluate and DLSSG_Dx12 still set the count, 0 included, whenever FG turns off.
+constexpr bool AsyncMarkersStopped(bool isRtssMarker, uint64_t lastAsyncMarkerFrameId, uint64_t markerFrameId)
+{
+    if (isRtssMarker || lastAsyncMarkerFrameId == 0)
+        return false;
+
+    return lastAsyncMarkerFrameId + 10 < markerFrameId;
+}
 } // namespace FpsLimitSync

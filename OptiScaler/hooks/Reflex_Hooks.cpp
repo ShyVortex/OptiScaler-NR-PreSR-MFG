@@ -128,7 +128,7 @@ NvAPI_Status ReflexHooks::hkNvAPI_D3D_SetLatencyMarker(IUnknown* pDev,
     const bool isRtssMarker = (pSetLatencyMarkerParams->frameID >> 32) != 0;
 
     // Some games just stop sending any async markers when DLSSG is disabled, so a reset is needed
-    if (!isRtssMarker && _lastAsyncMarkerFrameId + 10 < pSetLatencyMarkerParams->frameID)
+    if (FpsLimitSync::AsyncMarkersStopped(isRtssMarker, _lastAsyncMarkerFrameId, pSetLatencyMarkerParams->frameID))
     {
         _FgNumFramesToGenerate = 0;
     }
