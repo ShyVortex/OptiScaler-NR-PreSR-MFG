@@ -139,6 +139,30 @@ spacing by 1 / limit cannot feed back. That is the planned fix.
 Run 1 failed while the cap was sent 21 times during active 4X. The log does not show which backend received it or
 whether XeLL slept. `LOWLATENCY_TRACE_LOGGING` is compiled out, and LogLevel 2 hides the debug lines.
 
+#### 4.2.1 The driver keeps a limit it got while XeFG was inactive (found testing v0.9.87-pre3)
+
+Lost Soul Aside, 4X, OptiScaler cap 120, LogLevel 0. Rates are per second, from `StartNewFrame` and
+`LocalPresent SyncInterval`.
+
+| Time | Event | Limit delivered | Base / output fps | XeFG `med` |
+|---|---|---|---|---|
+| 18:49:56 | 120 set, XeFG active | fakenvapi/XeLL | 30 / 120 | 33.2 ms |
+| 18:50:56, 18:51:14, 18:51:33 | alt-tab: the game sends DLSS-G `eOff` (XeFG passthrough), then `eOn` | the driver on `eOff`, fakenvapi again on `eOn` | 28 / 112 | 35.6 ms |
+| 18:51:40 | limit reset to 0, XeFG active (`cap step 0.00 ms`) | fakenvapi only | 30 / 120; pure render time 8 → 19 ms (a limiter still sleeps) | 33.3 ms |
+| 18:51:55 | alt-tab (`eOff`) | 0 to the driver | 38–55 / 150–220 (uncapped) | 24–26 ms |
+
+- The alt-tabs do not recreate XeFG's context. The limit was resent on every route change, as intended.
+- The driver kept enforcing the limit it got during `eOff` after XeFG resumed. Two limiters at 120 gave 112.
+- After the reset, the driver's 120 was the only limiter left, and it held output at exactly 120 until the next `eOff`
+  delivered 0 to it.
+- Not visible in the log: what still reaches the driver's Reflex while XeFG runs. The game's Sleep calls go to
+  fakenvapi at 4X.
+- Fix: while fakenvapi carries the limit, the driver gets the game's own interval back
+  (`FpsLimitSync::ClearDriverLimit`). `ReflexHooks` tracks the interval the driver last received from OptiScaler,
+  from both `setFPSLimit` and the injection in `hkNvAPI_D3D_SetSleepMode`.
+- Nothing is sent to fakenvapi while XeFG is inactive. XeLL does not sleep then, and calling fakenvapi could create a
+  low-latency context in a game that never uses XeFG.
+
 ### 4.3 The fallback limiter assumes 2X
 
 `OptiScaler/misc/FrameLimit.cpp`:
@@ -234,12 +258,19 @@ On `fix/fps-limiter-xemfg`, one task per commit:
    fallback sleep (`48087c67` turned the DXGI-side ones off there), one per real present.
 8. **The game's XeLL context path.** Clear the stuck flag; inject the limit in `hkxellSetSleepMode`.
 9. Test build and in-game verification.
+10. **One backend holds the limit.** Clear the driver's leftover OptiScaler interval while fakenvapi carries the limit
+    (4.2.1).
 
 Out of scope: even spacing without a cap. It needs pacing off the engine thread, a separate investigation.
 
 ## 7. Verification
 
-Pending. Each task adds its unit test. In-game checks:
+v0.9.87-pre3 (Lost Soul Aside, 4X, Windows, maintainer):
+- Uncapped: frame delivery and pacing good.
+- Cap 120: 120 out, base 30, even pacing.
+- Alt-tab: the cap dropped to 110–112 and a reset did not apply until the next alt-tab (4.2.1, fixed in task 10).
+
+Each task adds its unit test. Remaining in-game checks:
 - Lost Soul Aside, 4X, OptiScaler cap 120:
   - even spacing (about 8.33 ms between presents);
   - the cap survives alt-tab and resize.

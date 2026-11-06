@@ -42,6 +42,17 @@ constexpr uint32_t IntervalToSend(uint32_t optiIntervalUs, uint32_t gameInterval
     return optiIntervalUs != 0 ? optiIntervalUs : gameIntervalUs;
 }
 
+// The driver keeps enforcing a Reflex limit it received while XeFG was inactive (an alt-tab turns DLSS-G off, so the
+// route becomes the driver), even after the game's calls moved back to fakenvapi. Two limiters ran at once (112 fps at
+// a 120 cap), and a reset sent only to fakenvapi left the driver's 120 in place (pre3 log,
+// FG-FPS-LIMIT-XEMFG-PACING-AND-SYNC.md, section 4.2). While fakenvapi carries the limit, the driver must not hold one
+// of OptiScaler's. Nothing is sent to fakenvapi while XeFG is inactive: XeLL does not sleep then, and calling it could
+// create a low-latency context in a game that never uses XeFG.
+constexpr bool ClearDriverLimit(Backend route, uint32_t driverOptiIntervalUs)
+{
+    return route == Backend::Fakenvapi && driverOptiIntervalUs != 0;
+}
+
 // Output cap the XeFG pacing engine spaces generated frames by. The limit counts presented frames, generated ones
 // included. External FG mode never runs OptiScaler's XeFG and never applies the limit.
 constexpr double OutputCapFps(float limitFps, bool externalFrameGeneration)

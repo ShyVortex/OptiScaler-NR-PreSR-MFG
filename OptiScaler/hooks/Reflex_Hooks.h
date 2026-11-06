@@ -41,6 +41,9 @@ class ReflexHooks
     // Which D3D backend last received the limit, and the low-latency context generation it reached
     // (FG-FPS-LIMIT-XEMFG-PACING-AND-SYNC.md, section 4.2).
     inline static FpsLimitSync::Pushed _lastPushed {};
+
+    // OptiScaler interval the driver last received (0 = none): cleared while fakenvapi carries the limit.
+    inline static uint32_t _driverOptiIntervalUs = 0;
     inline static std::atomic<uint32_t> _lowLatencyGeneration { 0 };
 
     // D3D

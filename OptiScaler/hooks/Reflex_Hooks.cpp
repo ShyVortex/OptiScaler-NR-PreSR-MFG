@@ -44,6 +44,9 @@ NvAPI_Status ReflexHooks::hkNvAPI_D3D_SetSleepMode(IUnknown* pDev, NV_SET_SLEEP_
     if (IsXeFGActive())
         return nvapi_calls::NvAPI_D3D_SetSleepMode(pDev, pSetSleepModeParams);
 
+    // The driver now holds OptiScaler's interval (or none); cleared once fakenvapi carries the limit again.
+    _driverOptiIntervalUs = _minimumIntervalUs;
+
     return o_NvAPI_D3D_SetSleepMode(pDev, pSetSleepModeParams);
 }
 
@@ -748,9 +751,26 @@ void ReflexHooks::setFPSLimit(float fps)
         const auto route = FpsLimitSync::Route(IsXeFGActive());
 
         if (route == FpsLimitSync::Backend::Fakenvapi)
+        {
             nvapi_calls::NvAPI_D3D_SetSleepMode(_lastSleepDev, &temp);
+
+            // Exactly one limiter: the driver still enforces what it got while XeFG was inactive.
+            if (FpsLimitSync::ClearDriverLimit(route, _driverOptiIntervalUs))
+            {
+                NV_SET_SLEEP_MODE_PARAMS driverParams {};
+                memcpy(&driverParams, &temp, sizeof(NV_SET_SLEEP_MODE_PARAMS));
+                driverParams.minimumIntervalUs = _lastSleepParams.minimumIntervalUs;
+                o_NvAPI_D3D_SetSleepMode(_lastSleepDev, &driverParams);
+
+                LOG_INFO("Cleared the FPS limit left in the driver ({} us)", _driverOptiIntervalUs);
+                _driverOptiIntervalUs = 0;
+            }
+        }
         else
+        {
             o_NvAPI_D3D_SetSleepMode(_lastSleepDev, &temp);
+            _driverOptiIntervalUs = _minimumIntervalUs;
+        }
 
         _lastPushed = { route, _lowLatencyGeneration.load(std::memory_order_acquire) };
     }

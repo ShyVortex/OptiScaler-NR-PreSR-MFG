@@ -21,6 +21,9 @@
 // 4. IntervalToSend: OptiScaler's limit wins, otherwise the game's own interval is kept.
 // 5. OutputCapFps: the limit, 0 without one or in External FG mode.
 // 6. Production wiring in Reflex_Hooks, XeFG_Dx12 and XeLL.
+// 7. pre3 in-game log (Lost Soul Aside 4X, cap 120): an alt-tab turns DLSS-G off, so the driver got the limit too, and
+//    the driver kept enforcing it after XeFG resumed. Two limiters gave 112 fps; a reset sent only to fakenvapi left
+//    the driver's 120. While fakenvapi carries the limit, the driver holds none of OptiScaler's.
 
 using namespace FpsLimitSync;
 
@@ -63,6 +66,8 @@ struct Session
     float lastFps = 0.0f;
     uint32_t driverIntervalUs = 0;
     uint32_t xellIntervalUs = 0;
+    uint32_t driverOptiIntervalUs = 0; // ReflexHooks::_driverOptiIntervalUs
+    uint32_t gameIntervalUs = 0;       // the game's own Reflex interval
     int sends = 0;
 
     void Present(float limitFps, bool xefgActive, bool hasDevice = true)
@@ -76,7 +81,24 @@ struct Session
 
             if (hasDevice)
             {
-                (route == Backend::Fakenvapi ? xellIntervalUs : driverIntervalUs) = interval;
+                const uint32_t toSend = IntervalToSend(interval, gameIntervalUs);
+
+                if (route == Backend::Fakenvapi)
+                {
+                    xellIntervalUs = toSend;
+
+                    if (ClearDriverLimit(route, driverOptiIntervalUs))
+                    {
+                        driverIntervalUs = gameIntervalUs;
+                        driverOptiIntervalUs = 0;
+                    }
+                }
+                else
+                {
+                    driverIntervalUs = toSend;
+                    driverOptiIntervalUs = interval;
+                }
+
                 last = { route, generation };
                 sends++;
             }
@@ -88,6 +110,9 @@ struct Session
             lastFps = limitFps;
         }
     }
+
+    // Limiters enforcing an OptiScaler interval while XeFG runs. The driver enforces its limit even then.
+    int ActiveLimitersWhileXeFG() const { return (xellIntervalUs != 0) + (driverIntervalUs != 0); }
 
     // XeFG_Dx12::CreateSwapchainContext: new XeLL context, initialised with the current limit, generation bumped.
     void NewXeLLContext(float limitFps)
@@ -143,11 +168,14 @@ int main()
         s.Present(120.0f, true);
         assert(s.xellIntervalUs == Interval120 && s.sends == 3);
 
-        // Pause (menu, loading): the game's calls go back to the driver, which still has the limit.
+        // Pause (menu, loading): the game's calls go back to the driver, which gets the limit.
         s.Present(120.0f, false);
         assert(s.driverIntervalUs == Interval120 && s.sends == 4);
+
+        // Resume: XeLL carries it again and the driver's copy is cleared (one limiter).
         s.Present(120.0f, true);
         assert(s.xellIntervalUs == Interval120 && s.sends == 5);
+        assert(s.driverIntervalUs == 0 && s.ActiveLimitersWhileXeFG() == 1);
 
         // Limit reset to 0 while active: sent once.
         s.Present(0.0f, true);
@@ -213,6 +241,57 @@ int main()
         const std::string xellH = ReadFile("OptiScaler/low_latency/low_latency_tech/ll_xell.h");
         assert(xellH.find("uint32_t last_minimumIntervalUs = ~0u;") != std::string::npos);
         std::printf("  [PASS] Test 6: Reflex_Hooks, XeFG_Dx12 and XeLL use the re-sync policy.\n");
+    }
+
+    // Test 7
+    {
+        constexpr uint32_t Interval120 = 8333;
+        Session s;
+        s.NewXeLLContext(0.0f);
+
+        // 18:49:56: 120 applied with XeFG active, XeLL only: 120 out.
+        s.Present(120.0f, true);
+        assert(s.xellIntervalUs == Interval120 && s.driverIntervalUs == 0);
+
+        // Three alt-tabs: eOff (XeFG inactive) then eOn. After each one, exactly one limiter while XeFG runs
+        // (before: the driver kept 120 next to XeLL's 120, 112 out).
+        for (int altTab = 0; altTab < 3; altTab++)
+        {
+            s.Present(120.0f, false);
+            assert(s.driverIntervalUs == Interval120);
+            s.Present(120.0f, true);
+            assert(s.ActiveLimitersWhileXeFG() == 1 && s.xellIntervalUs == Interval120);
+        }
+
+        // 18:51:40: limit reset with XeFG active. Before, the driver's 120 stayed until the next alt-tab.
+        s.Present(0.0f, true);
+        assert(s.ActiveLimitersWhileXeFG() == 0);
+
+        // The game's own Reflex cap is what the driver gets back, never 0 over it.
+        Session g;
+        g.gameIntervalUs = 16667;
+        g.Present(120.0f, false);
+        g.Present(120.0f, true);
+        assert(g.driverIntervalUs == 16667 && g.driverOptiIntervalUs == 0);
+
+        // Without XeFG (never active), the driver keeps the limit: it is the only backend.
+        Session d;
+        for (int i = 0; i < 100; i++)
+            d.Present(120.0f, false);
+        assert(d.driverIntervalUs == Interval120 && d.xellIntervalUs == 0);
+
+        const std::string reflex = ReadFile("OptiScaler/hooks/Reflex_Hooks.cpp");
+        const std::string setLimit = Between(reflex, "void ReflexHooks::setFPSLimit(", "\n}\n");
+        const size_t fake = setLimit.find("nvapi_calls::NvAPI_D3D_SetSleepMode(_lastSleepDev, &temp);");
+        const size_t clear = setLimit.find("FpsLimitSync::ClearDriverLimit(route, _driverOptiIntervalUs)");
+        assert(fake != std::string::npos && clear != std::string::npos && fake < clear);
+        assert(setLimit.find("driverParams.minimumIntervalUs = _lastSleepParams.minimumIntervalUs;") !=
+               std::string::npos);
+        assert(setLimit.find("_driverOptiIntervalUs = _minimumIntervalUs;") != std::string::npos);
+
+        const std::string hook = Between(reflex, "ReflexHooks::hkNvAPI_D3D_SetSleepMode(", "\n}\n");
+        assert(hook.find("_driverOptiIntervalUs = _minimumIntervalUs;") > hook.find("if (IsXeFGActive())"));
+        std::printf("  [PASS] Test 7: one limiter after alt-tabs; a reset clears both; the game's cap is kept.\n");
     }
 
     std::printf("All FPS limit re-sync tests passed.\n");
