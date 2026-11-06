@@ -616,6 +616,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClInclude Include="menu\menu_overlay_base.h" />
     <ClInclude Include="menu\menu_overlay_dx.h" />
     <ClInclude Include="menu\menu_overlay_vk.h" />
+    <ClInclude Include="menu\MenuOverlayVkPolicy.h" />
     <ClInclude Include="wrapped\wrapped_swapchain.h" />
     <ClInclude Include="Logger.h" />
     <ClInclude Include="proxies\NVNGX_Proxy.h" />

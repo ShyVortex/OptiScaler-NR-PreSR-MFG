@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "menu_overlay_base.h"
 #include "menu_overlay_vk.h"
 
@@ -8,6 +8,8 @@
 
 #include <imgui/imgui_impl_vulkan.h>
 #include <imgui/imgui_impl_win32.h>
+
+#include "MenuOverlayVkPolicy.h"
 
 // Vulkan overlay code adopted from here:
 // https://gist.github.com/mem99/0ec31ca302927457f86b1d6756aaa8c4
@@ -26,6 +28,12 @@ static VkSemaphore* _ImVulkan_Semaphores = VK_NULL_HANDLE;
 static VkRenderPass _vkRenderPass = VK_NULL_HANDLE;
 static uint32_t _scImageCount;
 static ULONG64 _frameCount;
+
+// The swapchain the framebuffers belong to, its image size, and how many per-image entries are allocated
+// (FG-LINUX-VK-OVERLAY-RESIZE-FREEZE.md).
+static VkSwapchainKHR _vkSwapchain = VK_NULL_HANDLE;
+static VkExtent2D _vkExtent {};
+static uint32_t _allocatedImageCount = 0;
 
 static void SetVkObjectName(VkDevice device, VkInstance instance, VkObjectType objectType, uint64_t objectHandle,
                             const char* name)
@@ -94,7 +102,14 @@ static void CreateVulkanObjects(VkDevice device, VkPhysicalDevice pd, VkInstance
         return;
     }
 
-    VkImage images[8];
+    if (!MenuOverlayVkPolicy::ImageCountSupported(_scImageCount))
+    {
+        LOG_ERROR("Unsupported swapchain image count: {}", _scImageCount);
+        _scImageCount = 0;
+        return;
+    }
+
+    VkImage images[MenuOverlayVkPolicy::MaxImages];
     result = vkGetSwapchainImagesKHR(device, *pSwapchain, &_scImageCount, images);
     if (result != VK_SUCCESS)
     {
@@ -104,10 +119,21 @@ static void CreateVulkanObjects(VkDevice device, VkPhysicalDevice pd, VkInstance
 
     // Alloc ImGui frame structure/semaphores for every image.
     // For convenience, I am using ImGui_ImplVulkanH_Frame in imgui_impl_vulkan.h
-    if (!_vulkanObjectsCreated)
+    // Reallocate only when a swapchain has more images than the arrays hold; zeroed, so DestroyVulkanObjects never
+    // sees stale handles.
+    if (MenuOverlayVkPolicy::NeedsReallocation(_allocatedImageCount, _scImageCount))
     {
+        if (_ImVulkan_Frames != VK_NULL_HANDLE)
+            IM_FREE(_ImVulkan_Frames);
+
+        if (_ImVulkan_Semaphores != VK_NULL_HANDLE)
+            IM_FREE(_ImVulkan_Semaphores);
+
         _ImVulkan_Frames = (ImGui_ImplVulkanH_Frame*) IM_ALLOC(sizeof(ImGui_ImplVulkanH_Frame) * _scImageCount);
         _ImVulkan_Semaphores = (VkSemaphore*) IM_ALLOC(sizeof(VkSemaphore) * _scImageCount);
+        memset(_ImVulkan_Frames, 0, sizeof(ImGui_ImplVulkanH_Frame) * _scImageCount);
+        memset(_ImVulkan_Semaphores, 0, sizeof(VkSemaphore) * _scImageCount);
+        _allocatedImageCount = _scImageCount;
     }
 
     // Select queue family.
@@ -425,6 +451,9 @@ static void CreateVulkanObjects(VkDevice device, VkPhysicalDevice pd, VkInstance
         }
     }
 
+    _vkSwapchain = *pSwapchain;
+    _vkExtent = pCreateInfo->imageExtent;
+
     _vulkanObjectsCreated = true;
     State::Instance().menuOverlayIsVulkan = true;
     LOG_FUNC_RESULT(_vulkanObjectsCreated);
@@ -496,6 +525,8 @@ void MenuOverlayVk::DestroyVulkanObjects(bool shutdown)
     }
 
     _ImVulkan_Info = {};
+    _vkSwapchain = VK_NULL_HANDLE;
+    _vkExtent = {};
 
     _vkCleanMutex.unlock();
 }
@@ -512,6 +543,15 @@ bool MenuOverlayVk::QueuePresent(VkQueue queue, VkPresentInfoKHR* pPresentInfo)
 
     if (pPresentInfo->swapchainCount == 0)
         return false;
+
+    // Only the swapchain the framebuffers were built for, with an image index they cover.
+    const uint32_t imageIndex = pPresentInfo->pImageIndices[0];
+    if (!MenuOverlayVkPolicy::ShouldDraw(pPresentInfo->pSwapchains[0], _vkSwapchain, imageIndex, _scImageCount))
+    {
+        LOG_TRACE("Skipping menu on swapchain {:X} (overlay swapchain {:X}), image {}",
+                  (UINT64) pPresentInfo->pSwapchains[0], (UINT64) _vkSwapchain, imageIndex);
+        return true;
+    }
 
     // std::lock_guard<std::mutex> lock(_vkPresentMutex);
     LOG_DEBUG("rendering menu, swapchain count: {0}", pPresentInfo->swapchainCount);
@@ -530,12 +570,15 @@ bool MenuOverlayVk::QueuePresent(VkQueue queue, VkPresentInfoKHR* pPresentInfo)
         if (State::Instance().delayMenuRenderBy > 0)
             State::Instance().delayMenuRenderBy--;
 
-        if (MenuOverlayBase::RenderMenu())
+        // Render at the swapchain image size, never the window size: after F11 / alt-tab the window changes size
+        // before the swapchain is recreated (FG-LINUX-VK-OVERLAY-RESIZE-FREEZE.md).
+        const auto extent = MenuOverlayVkPolicy::RenderExtent({ _vkExtent.width, _vkExtent.height });
+
+        if (MenuOverlayBase::RenderMenu(ImVec2(static_cast<float>(extent.width), static_cast<float>(extent.height))))
         {
             if (State::Instance().delayMenuRenderBy == 0)
             {
-                uint32_t idx = pPresentInfo->pImageIndices[0];
-                ImGui_ImplVulkanH_Frame* fd = &_ImVulkan_Frames[idx];
+                ImGui_ImplVulkanH_Frame* fd = &_ImVulkan_Frames[imageIndex];
 
                 vkWaitForFences(_ImVulkan_Info.Device, 1, &fd->Fence, VK_TRUE, UINT64_MAX);
                 vkResetFences(_ImVulkan_Info.Device, 1, &fd->Fence);
@@ -553,8 +596,8 @@ bool MenuOverlayVk::QueuePresent(VkQueue queue, VkPresentInfoKHR* pPresentInfo)
                     info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
                     info.renderPass = _vkRenderPass;
                     info.framebuffer = fd->Framebuffer;
-                    info.renderArea.extent.width = static_cast<uint32_t>(ImGui::GetIO().DisplaySize.x);
-                    info.renderArea.extent.height = static_cast<uint32_t>(ImGui::GetIO().DisplaySize.y);
+                    info.renderArea.extent.width = extent.width;
+                    info.renderArea.extent.height = extent.height;
                     vkCmdBeginRenderPass(fd->CommandBuffer, &info, VK_SUBPASS_CONTENTS_INLINE);
                 }
 
