@@ -1346,7 +1346,10 @@ HRESULT FGHooks::FGPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags,
     if (willPresent && !state.reflexLimitsFps && state.activeFgOutput != FGOutput::NoFG &&
         !IdentifyGpu::getPrimaryGpu().usesDxvk && !XellHooks::canLimit())
     {
-        FrameLimit::sleep(fg != nullptr ? fg->IsActive() && !fg->IsPaused() : false);
+        // Once per real frame: wait one output interval per presented frame
+        // (FG-FPS-LIMIT-XEMFG-PACING-AND-SYNC.md, 4.3).
+        FrameLimit::sleep(FrameLimitPolicy::OutputMultiplier(fg != nullptr && fg->IsActive() && !fg->IsPaused(),
+                                                             fg != nullptr ? fg->GetInterpolatedFrameCount() : 0));
     }
 
     if ((config->SimulateWaitableObject.value_or_default() ||

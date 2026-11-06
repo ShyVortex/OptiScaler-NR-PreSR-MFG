@@ -893,8 +893,9 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::Present(UINT SyncInterval, UIN
 
         // When Reflex can't be used to limit, sleep in present
         if (!State::Instance().reflexLimitsFps && State::Instance().activeFgOutput == FGOutput::NoFG &&
+            FrameLimitPolicy::AppliesInMode(State::Instance().externalFrameGeneration) &&
             !IdentifyGpu::getPrimaryGpu().usesDxvk && !XellHooks::canLimit())
-            FrameLimit::sleep(false);
+            FrameLimit::sleep(1);
     }
     else
     {
@@ -1266,9 +1267,9 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::Present1(UINT SyncInterval, UI
 
         // When Reflex can't be used to limit, sleep in present
         if (!State::Instance().reflexLimitsFps && State::Instance().activeFgOutput == FGOutput::NoFG &&
-            !State::Instance().externalFrameGeneration && !IdentifyGpu::getPrimaryGpu().usesDxvk &&
-            !XellHooks::canLimit())
-            FrameLimit::sleep(false);
+            FrameLimitPolicy::AppliesInMode(State::Instance().externalFrameGeneration) &&
+            !IdentifyGpu::getPrimaryGpu().usesDxvk && !XellHooks::canLimit())
+            FrameLimit::sleep(1);
     }
     else
     {

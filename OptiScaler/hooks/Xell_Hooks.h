@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <dxgi.h>
 #include <d3d12.h>
@@ -7,6 +7,7 @@
 #include <xell_d3d12.h>
 
 #include "Hook_Utils.h"
+#include "FpsLimitSync.h"
 
 typedef decltype(&xellDestroyContext) PFN_xellDestroyContext;
 typedef decltype(&xellSetSleepMode) PFN_xellSetSleepMode;
@@ -24,6 +25,11 @@ class XellHooks
     inline static xell_context_handle_t gamesContext = nullptr;
     inline static bool gamesContextCanLimitFps = false;
     inline static bool blockExternal = false;
+
+    // Last limit written into the game's context, which context it was, and the game's own interval to restore.
+    inline static xell_context_handle_t gamesContextSentTo = nullptr;
+    inline static float gamesContextSentLimit = 0.0f;
+    inline static uint32_t gamesRequestedIntervalUs = 0;
 
     inline static PFN_xellDestroyContext o_xellDestroyContext = nullptr;
     inline static PFN_xellSetSleepMode o_xellSetSleepMode = nullptr;

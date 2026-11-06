@@ -3,6 +3,7 @@
 #include <detours/detours.h>
 #include <magic_enum.hpp>
 #include <proxies/XeLL_Proxy.h>
+#include <Config.h>
 
 #define HOOK(name)                                                                                                     \
     if (o_##name)                                                                                                      \
@@ -47,7 +48,14 @@ bool XellHooks::Hook()
 
 void XellHooks::setOurContext(xell_context_handle_t context) { ourContext = context; }
 
-void XellHooks::blockExternalContexts(bool state) { blockExternal = state; }
+void XellHooks::blockExternalContexts(bool state)
+{
+    blockExternal = state;
+
+    // Blocked calls never reach the game's context: it can no longer carry the limit.
+    if (state)
+        gamesContextCanLimitFps = false;
+}
 
 // Use context to determine blocking, otherwise just block calls from exe
 bool XellHooks::shouldBlock(xell_context_handle_t context)
@@ -69,25 +77,33 @@ bool XellHooks::canLimit() { return gamesContextCanLimitFps; }
 // only DX12
 bool XellHooks::update()
 {
-    if (!o_xellGetSleepMode || !o_xellSetSleepMode || blockExternal || gamesContext == nullptr)
+    const bool hooksReady = o_xellGetSleepMode != nullptr && o_xellSetSleepMode != nullptr;
+
+    xell_sleep_params_t currentParams {};
+    const bool gotParams = hooksReady && !blockExternal && gamesContext != nullptr &&
+                           o_xellGetSleepMode(gamesContext, &currentParams) == XELL_RESULT_SUCCESS;
+
+    gamesContextCanLimitFps = FpsLimitSync::GameXellCanLimit(hooksReady, blockExternal, gamesContext != nullptr,
+                                                             gotParams && currentParams.bLowLatencyMode);
+
+    if (!gamesContextCanLimitFps)
         return false;
 
-    xell_sleep_params_t currentParams;
-    o_xellGetSleepMode(gamesContext, &currentParams);
+    const float limit = Config::Instance()->FramerateLimit.value_or_default();
+    const bool sameContext = gamesContextSentTo == gamesContext;
 
-    if (!currentParams.bLowLatencyMode)
+    if (!FpsLimitSync::GameXellNeedsPush(sameContext, gamesContextSentLimit, limit))
         return false;
 
-    gamesContextCanLimitFps = true;
+    // A context we never wrote still holds the game's own interval: keep it, to restore it when the limit is reset.
+    if (!sameContext)
+        gamesRequestedIntervalUs = currentParams.minimumIntervalUs;
 
-    static float lastFpslimit = 0.0f;
-    if (lastFpslimit == Config::Instance()->FramerateLimit.value_or_default())
-        return false;
-    lastFpslimit = Config::Instance()->FramerateLimit.value_or_default();
-    if (lastFpslimit <= 0.0f)
-        currentParams.minimumIntervalUs = 0u;
-    else
-        currentParams.minimumIntervalUs = static_cast<uint32_t>(std::round(1'000'000 / lastFpslimit));
+    currentParams.minimumIntervalUs =
+        FpsLimitSync::IntervalToSend(FpsLimitSync::IntervalUs(limit), gamesRequestedIntervalUs);
+
+    gamesContextSentTo = gamesContext;
+    gamesContextSentLimit = limit;
 
     return o_xellSetSleepMode(gamesContext, &currentParams) == XELL_RESULT_SUCCESS;
 }
@@ -95,7 +111,11 @@ bool XellHooks::update()
 xell_result_t XellHooks::hkxellDestroyContext(xell_context_handle_t context)
 {
     if (gamesContext == context)
+    {
         gamesContext = nullptr;
+        gamesContextCanLimitFps = false;
+        gamesContextSentTo = nullptr;
+    }
 
     if (shouldBlock(context))
         return XELL_RESULT_SUCCESS;
@@ -106,6 +126,22 @@ xell_result_t XellHooks::hkxellSetSleepMode(xell_context_handle_t context, const
 {
     if (shouldBlock(context))
         return XELL_RESULT_SUCCESS;
+
+    // The game writing its own sleep mode used to wipe OptiScaler's limit for good: keep the game's interval (restored
+    // when the limit is reset) and send OptiScaler's while one is set.
+    if (param != nullptr && context != nullptr && context == gamesContext && context != ourContext)
+    {
+        gamesRequestedIntervalUs = param->minimumIntervalUs;
+
+        const uint32_t optiIntervalUs = FpsLimitSync::IntervalUs(Config::Instance()->FramerateLimit.value_or_default());
+        if (optiIntervalUs != 0)
+        {
+            xell_sleep_params_t params = *param;
+            params.minimumIntervalUs = optiIntervalUs;
+            return o_xellSetSleepMode(context, &params);
+        }
+    }
+
     // spdlog::info("xellSetSleepMode");
     return o_xellSetSleepMode(context, param);
 }

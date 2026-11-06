@@ -24,6 +24,47 @@ constexpr int64_t PureRenderNs(int64_t totalDeltaNs, int64_t blockNs)
     return (totalDeltaNs > blockNs + MinPureRenderNs) ? (totalDeltaNs - blockNs) : MinPureRenderNs;
 }
 
+// Bounds of the step TsDetour gives the provider's scheduler between two presents of one burst.
+constexpr int64_t MinStepNs = 1000000LL;  // 1 ms
+constexpr int64_t MaxStepNs = 20000000LL; // 20 ms
+
+// Present interval of an OptiScaler FPS cap, or 0 without one. The cap counts every presented frame, generated ones
+// included (docs/DLSS-FRAME-GENERATION.md).
+constexpr int64_t CapStepNs(double capFps)
+{
+    if (!(capFps > 0.0))
+        return 0;
+
+    return static_cast<int64_t>(1000000000.0 / capFps);
+}
+
+// Time between two presents of one burst, before the step bounds.
+//
+// periodNs / multiplier comes from the pure render time. That never contains our own waits, so it cannot feed back
+// (FG-XEMFG-RESONANT-LOCK-AND-TIMING-DECOUPLING.md), but it is shorter than the real cadence whenever something
+// else sets the cadence: under a cap all frames of a burst land in the first part of the base frame.
+//
+// Under an OptiScaler cap the cadence is known from the setting: one present per cap interval. That value does not
+// depend on any measurement either, so using it as a floor cannot feed back (FG-FPS-LIMIT-XEMFG-PACING-AND-SYNC.md).
+// The spacing is even while the pure render time stays at or under the cap interval; above that it stays bounded.
+// Never use the provider's ring median here.
+constexpr int64_t IntervalNs(int64_t periodNs, int64_t multiplier, int64_t capStepNs)
+{
+    const int64_t renderStepNs = multiplier > 0 ? periodNs / multiplier : 0;
+    return capStepNs > renderStepNs ? capStepNs : renderStepNs;
+}
+
+// Step TsDetour hands to the provider's scheduler: IntervalNs within MinStepNs..MaxStepNs.
+constexpr int64_t StepNs(int64_t refNs, int64_t multiplier, int64_t capStepNs)
+{
+    const int64_t stepNs = IntervalNs(refNs, multiplier, capStepNs);
+
+    if (stepNs < MinStepNs)
+        return MinStepNs;
+
+    return stepNs > MaxStepNs ? MaxStepNs : stepNs;
+}
+
 // Whether a generated frame must only be measured (NoteFrame), not paced.
 //
 // When the provider's scheduler is usable it already schedules the last generated frame of a burst, so OptiScaler

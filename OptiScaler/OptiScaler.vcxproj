@@ -371,6 +371,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClInclude Include="hooks\Hook_Utils.h" />
     <ClInclude Include="hooks\StreamlineLogPrefs.h" />
     <ClInclude Include="hooks\GameXeFGBlockPolicy.h" />
+    <ClInclude Include="hooks\FpsLimitSync.h" />
     <ClInclude Include="hooks\GameXeFG_Hooks.h" />
     <ClInclude Include="hooks\LibraryLoad_Hooks.h" />
     <ClInclude Include="hooks\CommandBuffer_StateTracker.h" />
@@ -525,6 +526,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClInclude Include="inputs\XeSS_Vulkan.h" />
     <ClInclude Include="menu\font\Hack_Compressed.h" />
     <ClInclude Include="misc\FrameLimit.h" />
+    <ClInclude Include="misc\FrameLimitPolicy.h" />
     <ClInclude Include="misc\Quirks.h" />
     <ClInclude Include="OwnedMutex.h" />
     <ClInclude Include="proxies\D3D12_Proxy.h" />

@@ -12,6 +12,7 @@
 #endif
 
 #include <algorithm>
+#include <atomic>
 #include <format>
 #include "Logger.h"
 #include "SysUtils.h"
@@ -101,6 +102,10 @@ inline int64_t g_schedWaitQpc = 0;
 inline int64_t g_lastMultiplier = 0;
 
 inline int64_t g_burstBlockQpc = 0;
+
+// Present interval of the OptiScaler FPS cap that currently applies, 0 without one. Written where the limit is
+// applied, read on the provider's present thread.
+inline std::atomic<int64_t> g_capStepNs { 0 };
 inline int64_t g_renderTimeNs = 0;
 inline double g_fedFrameTimeMs = 0.0;
 
@@ -182,11 +187,12 @@ inline void ReportStats(int64_t multiplier)
     LOG_INFO("XeFG pacing: {}X, real frame {:.2f} ms ({:.1f} fps), target {:.2f} ms/frame; "
              "gap {:.2f} avg / {:.2f} min / {:.2f} max ms over {} frames; "
              "scheduler {} calls, {} refused, {:.2f} ms avg inside; "
-             "deadlines {} calls, {} rebased, {} clamped; render-est {:.2f} ms, fed {:.2f} ms",
+             "deadlines {} calls, {} rebased, {} clamped; render-est {:.2f} ms, fed {:.2f} ms, cap step {:.2f} ms",
              multiplier, g_periodNs / 1000000.0, g_periodNs > 0 ? 1e9 / g_periodNs : 0.0, MsFromQpc(g_intervalQpc),
              MsFromQpc(g_gapSumQpc / g_gapCount), MsFromQpc(g_gapMinQpc), MsFromQpc(g_gapMaxQpc), g_gapCount,
              g_schedCalls, g_schedRefused, g_schedCalls > 0 ? MsFromQpc(g_schedWaitQpc / g_schedCalls) : 0.0, g_tsCalls,
-             g_tsRebased, g_tsClamped, g_renderTimeNs / 1000000.0, g_fedFrameTimeMs);
+             g_tsRebased, g_tsClamped, g_renderTimeNs / 1000000.0, g_fedFrameTimeMs,
+             g_capStepNs.load(std::memory_order_relaxed) / 1000000.0);
 
     if (g_diagSeq > 0)
     {
@@ -305,7 +311,15 @@ inline void NoteFrame(uint64_t index, uint64_t count, int64_t nowQpc)
     g_pacedBursts++;
 
     if (g_periodNs > 0 && g_freq.QuadPart > 0)
-        g_intervalQpc = QpcFromNs(g_periodNs / (static_cast<int64_t>(count) + 1));
+        g_intervalQpc = QpcFromNs(XeFGPacingPolicy::IntervalNs(g_periodNs, static_cast<int64_t>(count) + 1,
+                                                               g_capStepNs.load(std::memory_order_relaxed)));
+}
+
+// Present interval of the OptiScaler FPS cap now applied (0 = none). Generated frames are spaced at least this far
+// apart, so a capped burst fills the base frame instead of landing in its first part.
+inline void SetOutputCapFps(double fps)
+{
+    g_capStepNs.store(XeFGPacingPolicy::CapStepNs(fps), std::memory_order_relaxed);
 }
 
 inline double RenderTimeMs() { return g_renderTimeNs > 0 ? g_renderTimeNs / 1000000.0 : 0.0; }
@@ -364,7 +378,8 @@ inline void PaceFrame(uint64_t index, uint64_t count)
         g_targetQpc += g_intervalQpc;
     }
 
-    const int64_t latest = now.QuadPart + QpcFromNs(g_periodNs);
+    // One wait never exceeds the longer of the render period and one interval (the interval can be the cap step).
+    const int64_t latest = now.QuadPart + std::max(QpcFromNs(g_periodNs), g_intervalQpc);
     if (g_targetQpc > latest)
         g_targetQpc = latest;
 
@@ -576,9 +591,11 @@ inline void* TsDetour(void* a1, int64_t* out, void* lookup, void* timing, uint32
     const int64_t nativeOut = *out;
     const int64_t median = *reinterpret_cast<const int64_t*>(reinterpret_cast<const uint8_t*>(timing) + 8);
 
-    // Calculate target step duration based on pure unblocked render time if available, or ring median
+    // Step from the pure unblocked render time if available, or the ring median before the first sample, floored to
+    // the OptiScaler cap interval when a cap applies (XeFGPacingPolicy::IntervalNs).
     const int64_t refNs = (g_renderTimeNs > 0) ? g_renderTimeNs : median;
-    const int64_t stepNs = std::clamp(refNs / static_cast<int64_t>(countPlus1), 1000000LL, 20000000LL);
+    const int64_t stepNs =
+        XeFGPacingPolicy::StepNs(refNs, static_cast<int64_t>(countPlus1), g_capStepNs.load(std::memory_order_relaxed));
 
     if (stepNs <= 0)
         return result;

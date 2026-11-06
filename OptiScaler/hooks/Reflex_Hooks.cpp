@@ -44,6 +44,9 @@ NvAPI_Status ReflexHooks::hkNvAPI_D3D_SetSleepMode(IUnknown* pDev, NV_SET_SLEEP_
     if (IsXeFGActive())
         return nvapi_calls::NvAPI_D3D_SetSleepMode(pDev, pSetSleepModeParams);
 
+    // The driver now holds OptiScaler's interval (or none); cleared once fakenvapi carries the limit again.
+    _driverOptiIntervalUs = _minimumIntervalUs;
+
     return o_NvAPI_D3D_SetSleepMode(pDev, pSetSleepModeParams);
 }
 
@@ -128,7 +131,7 @@ NvAPI_Status ReflexHooks::hkNvAPI_D3D_SetLatencyMarker(IUnknown* pDev,
     const bool isRtssMarker = (pSetLatencyMarkerParams->frameID >> 32) != 0;
 
     // Some games just stop sending any async markers when DLSSG is disabled, so a reset is needed
-    if (!isRtssMarker && _lastAsyncMarkerFrameId + 10 < pSetLatencyMarkerParams->frameID)
+    if (FpsLimitSync::AsyncMarkersStopped(isRtssMarker, _lastAsyncMarkerFrameId, pSetLatencyMarkerParams->frameID))
     {
         _FgNumFramesToGenerate = 0;
     }
@@ -715,7 +718,13 @@ void ReflexHooks::update(bool fgActive, bool isVulkan)
         currentFps /= (_FgNumFramesToGenerate + 1);
     }
 
-    if (currentFps != lastFps)
+    // A limit sent while XeFG was inactive reached only the driver, one sent while it was active only fakenvapi/XeLL,
+    // and a new XeLL context starts without it: resend whenever the route or the context changed.
+    const bool resend =
+        FpsLimitSync::NeedsResend(_lastPushed, FpsLimitSync::Route(IsXeFGActive()),
+                                  _lowLatencyGeneration.load(std::memory_order_acquire), _lastSleepDev != nullptr);
+
+    if (currentFps != lastFps || resend)
     {
         setFPSLimit(currentFps);
         lastFps = currentFps;
@@ -737,22 +746,51 @@ void ReflexHooks::setFPSLimit(float fps)
     {
         NV_SET_SLEEP_MODE_PARAMS temp {};
         memcpy(&temp, &_lastSleepParams, sizeof(NV_SET_SLEEP_MODE_PARAMS));
-        temp.minimumIntervalUs = _minimumIntervalUs;
+        temp.minimumIntervalUs = FpsLimitSync::IntervalToSend(_minimumIntervalUs, _lastSleepParams.minimumIntervalUs);
 
-        if (IsXeFGActive())
+        const auto route = FpsLimitSync::Route(IsXeFGActive());
+
+        if (route == FpsLimitSync::Backend::Fakenvapi)
+        {
             nvapi_calls::NvAPI_D3D_SetSleepMode(_lastSleepDev, &temp);
+
+            // Exactly one limiter: the driver still enforces what it got while XeFG was inactive.
+            if (FpsLimitSync::ClearDriverLimit(route, _driverOptiIntervalUs))
+            {
+                NV_SET_SLEEP_MODE_PARAMS driverParams {};
+                memcpy(&driverParams, &temp, sizeof(NV_SET_SLEEP_MODE_PARAMS));
+                driverParams.minimumIntervalUs = _lastSleepParams.minimumIntervalUs;
+                o_NvAPI_D3D_SetSleepMode(_lastSleepDev, &driverParams);
+
+                LOG_INFO("Cleared the FPS limit left in the driver ({} us)", _driverOptiIntervalUs);
+                _driverOptiIntervalUs = 0;
+            }
+        }
         else
+        {
             o_NvAPI_D3D_SetSleepMode(_lastSleepDev, &temp);
+            _driverOptiIntervalUs = _minimumIntervalUs;
+        }
+
+        _lastPushed = { route, _lowLatencyGeneration.load(std::memory_order_acquire) };
+    }
+    else
+    {
+        _lastPushed = {};
     }
 
     if (_lastVkSleepDev != nullptr)
     {
         NV_VULKAN_SET_SLEEP_MODE_PARAMS temp {};
         memcpy(&temp, &_lastVkSleepParams, sizeof(NV_VULKAN_SET_SLEEP_MODE_PARAMS));
-        temp.minimumIntervalUs = _minimumIntervalUs;
+        temp.minimumIntervalUs = FpsLimitSync::IntervalToSend(_minimumIntervalUs, _lastVkSleepParams.minimumIntervalUs);
         o_NvAPI_Vulkan_SetSleepMode(_lastVkSleepDev, &temp);
     }
 }
+
+uint32_t ReflexHooks::minimumIntervalUs() { return _minimumIntervalUs; }
+
+void ReflexHooks::lowLatencyContextChanged() { _lowLatencyGeneration.fetch_add(1, std::memory_order_acq_rel); }
 
 bool ReflexHooks::gameIsSendingMarkers()
 {
