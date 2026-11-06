@@ -72,4 +72,31 @@ constexpr bool AsyncMarkersStopped(bool isRtssMarker, uint64_t lastAsyncMarkerFr
 // resending the limit (FG-FPS-LIMIT-XEMFG-PACING-AND-SYNC.md, section 4.6). Native Vulkan games (no DXGI swapchain)
 // keep it. The Vulkan-side fallback sleep is not affected: it is the fallback owner on DXVK (48087c67).
 constexpr bool VulkanPresentDrivesReflex(bool usesDxvk, bool d3dSwapchain) { return !(usesDxvk && d3dSwapchain); }
+
+// Reflex / XeLL minimumIntervalUs for an FPS limit; 0 = no limit.
+constexpr uint32_t IntervalUs(float limitFps)
+{
+    if (!(limitFps > 0.0f))
+        return 0;
+
+    return static_cast<uint32_t>(1000000.0 / static_cast<double>(limitFps) + 0.5);
+}
+
+// The game's own XeLL context (XellHooks) can carry the limit only while OptiScaler is not blocking it (no XeFG XeLL of
+// ours) and the game has low latency on. Re-evaluated every frame: it used to be set once and never cleared
+// (FG-FPS-LIMIT-XEMFG-PACING-AND-SYNC.md, section 4.7).
+constexpr bool GameXellCanLimit(bool hooksReady, bool blockExternal, bool hasGameContext, bool gameLowLatencyOn)
+{
+    return hooksReady && !blockExternal && hasGameContext && gameLowLatencyOn;
+}
+
+// Whether XellHooks::update must write the limit into the game's XeLL context. A context we never wrote gets it only
+// when there is a limit, so the game's own interval is left alone otherwise; afterwards, whenever the limit changes.
+constexpr bool GameXellNeedsPush(bool sameContext, float lastSentFps, float limitFps)
+{
+    if (!sameContext)
+        return limitFps > 0.0f;
+
+    return lastSentFps != limitFps;
+}
 } // namespace FpsLimitSync
