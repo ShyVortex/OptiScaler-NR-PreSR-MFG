@@ -331,3 +331,42 @@ This guarantees that extended Windows interfaces (`IDXGISwapChainMedia`) and pro
   - no parse errors in both scripts and in the two changed inline steps; the YAML parses.
   - **Not yet:** a real installer build. Expected: the selection line shows 0.1.0 vs 0.1.1 → `.asi`, and the
     standalone zip contains a 0.1.1 `OptiScaler/nvsmooth30.dll`.
+
+### 6.9 NVSmooth30 0.1.1 on 621.01, and the Present recursion when OptiScaler runs as `winmm.dll` (`b78a42a4`)
+- **Report:** kilyan82, v0.9.86 (DLSS Unlocked NR-v0.9.86 with NVSmooth30 0.1.1), RTX 3070 Ti, driver 621.01,
+  Neverness to Everness (DX12, UE5), OptiScaler as `winmm.dll`. Two runs (2026-11-04, and 2026-11-05 with "Enable the
+  Steam Overlay while in-game" off). Both crash at start; without `nvsmooth30.dll` the game runs.
+- **PR 4 works on this driver:** `nvsmooth30.log` shows `startup 0.1.1`, `Diagnostics=1`, `cudart lazy table located
+  dynamically: resolver=+0x1362e0 slot=+0x771158` (as predicted in 6.7), and 19 kernel loads with `sm89->86=1 rc=0`.
+- **The crash:** `EXCEPTION_STACK_OVERFLOW`. Read from each `UEMinidump.dmp` (crashing thread's stack, module list):
+  - `nvsmooth30.dll+0x9076` → `gameoverlayrenderer64.dll+0x9c031` / `+0x9c20f` → `nvsmooth30.dll` again, 1,493 times
+    in both dumps;
+  - NVSmooth30's Present hook and the Steam overlay's forward into each other. The exact mechanism is unconfirmed (no
+    symbols). The overlay DLL was still loaded with the overlay switched off, so that test couldn't remove it.
+- **Why NVSmooth30 had Present hooks at all:**
+  - `nvsmooth30.log` says `DXGI Present hooks installed (slots 8 and 22)`, unlike every earlier log (`dummy D3D11
+    swapchain creation failed: 0x887A0001`);
+  - `OptiScaler.log`: `NVSmooth30Loader: Loading ...` at 18:09:41.22 / 18:12:48.43, the first `DxgiHooks::Hook` at
+    18:09:43.31 / 18:12:49.88;
+  - as `winmm.dll`, `CheckWorkingMode` finds no `dxgi.dll` and installs no DXGI hooks. `getGpuInfo` loads `dxgi.dll`
+    through `IdentifyGpu::checkGpuInfo` without hooking it, then calls `NVSmooth30Loader::TrySetup()`. So the 4.5 block
+    didn't exist yet when NVSmooth30 created its dummy swapchain;
+  - `DxgiHooks::Hook` also skipped installing anything without the overlay menu, FG or DXGI spoofing, so in that
+    configuration the block never existed.
+- **The fix (`b78a42a4`, Option A of `nvsmooth30_load_order_plan.md`):**
+  - `NVSmooth30Loader::DecideLoadGate`: `TrySetup` waits until `DxgiHooks::FactoryHooksInstalled()` (all three
+    `CreateDXGIFactory*` hooked), after the platform/GPU guards and before the DRS write, path resolution and load;
+  - the `CreateDXGIFactory*` hooks call `NVSmooth30Loader::RunPendingSetup()`: they run on game calls only, never in
+    `DllMain`, and before any swapchain. The pending flag is claimed first, so a factory created during setup can't
+    re-enter;
+  - `DxgiHooks::Hook` keeps the factory hooks whenever Smooth Motion with NVSmooth30 is requested;
+  - the menu shows "Waiting for OptiScaler's DXGI hooks".
+- **Why Option A (always block NVSmooth30's Present hooks):** NvPresent starts with the block in effect (johnCXVII's
+  616.92 logs loaded all kernels with the hooks blocked). If Smooth Motion still generates no frames with the block in
+  every proxy mode, keeping the hooks and handling the overlay collision (Option B) comes back.
+- **Test:** `tests/nvsmooth30_load_order_unit.cpp` (6/6 PASS). `nvsmooth30_attach_probe_unit`, `nvsmooth30_loader_unit`
+  and `ampere_smooth_motion_unit` still pass. clang-format 23 clean; UTF-8 BOM present.
+- **Expected in game (not yet checked):** `OptiScaler.log` shows `waiting for OptiScaler's DXGI hooks`, then `DXGI hooks
+  installed, running the deferred setup` and `Loading ... nvsmooth30.dll`; `nvsmooth30.log` shows `dummy D3D11
+  swapchain creation failed: 0x887A0001`; no crash. Then: does the frame rate double, and does the menu report the
+  swapchain as bound?
