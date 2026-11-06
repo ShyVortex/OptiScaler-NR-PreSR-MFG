@@ -328,7 +328,10 @@ static VkResult hkvkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* pPres
         return VK_ERROR_OUT_OF_DATE_KHR;
     }
 
-    ReflexHooks::update(false, true);
+    // A D3D game on DXVK / vkd3d-proton already ran update from its DXGI present, with the real FG state.
+    const auto scApi = State::Instance().swapchainApi;
+    if (FpsLimitSync::VulkanPresentDrivesReflex(IdentifyGpu::getPrimaryGpu().usesDxvk, scApi == DX11 || scApi == DX12))
+        ReflexHooks::update(false, true);
 
     // original call
     ScopedVulkanCreatingSC scopedVulkanCreatingSC {};

@@ -65,4 +65,11 @@ constexpr bool AsyncMarkersStopped(bool isRtssMarker, uint64_t lastAsyncMarkerFr
 
     return lastAsyncMarkerFrameId + 10 < markerFrameId;
 }
+
+// Whether the Vulkan present hook should drive ReflexHooks::update. On DXVK / vkd3d-proton a D3D game's present also
+// reaches vkQueuePresentKHR, after the DXGI side already ran update with the real FG state. A second update from the
+// Vulkan side with fgActive = false disagreed with it and could flip reflexLimitsFps every frame, resetting and
+// resending the limit (FG-FPS-LIMIT-XEMFG-PACING-AND-SYNC.md, section 4.6). Native Vulkan games (no DXGI swapchain)
+// keep it. The Vulkan-side fallback sleep is not affected: it is the fallback owner on DXVK (48087c67).
+constexpr bool VulkanPresentDrivesReflex(bool usesDxvk, bool d3dSwapchain) { return !(usesDxvk && d3dSwapchain); }
 } // namespace FpsLimitSync

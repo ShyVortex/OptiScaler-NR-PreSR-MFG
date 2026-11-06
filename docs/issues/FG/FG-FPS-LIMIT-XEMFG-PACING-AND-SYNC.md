@@ -229,7 +229,9 @@ On `fix/fps-limiter-xemfg`, one task per commit:
    - No limiter sleep in `Present`, `Present1` or the Vulkan hook.
    - The menu says the limit is not available in External mode and points to RTSS or the game's own limit.
 6. **Frame-count flapping.** Reset on stale async markers only if the game has sent async markers.
-7. **DXVK.** The Vulkan present hook does not drive `ReflexHooks::update` or the fallback for D3D swapchains.
+7. **DXVK.** For D3D swapchains, the Vulkan present hook no longer runs its own `ReflexHooks::update`; the DXGI side's
+   update, which has the real FG state, decides alone. The Vulkan-side fallback sleep stays: under DXVK it is the only
+   fallback sleep (`48087c67` turned the DXGI-side ones off there), one per real present.
 8. **The game's XeLL context path.** Clear the stuck flag; inject the limit in `hkxellSetSleepMode`.
 9. Test build and in-game verification.
 
