@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "FrameLimit.h"
 
 #include "Config.h"
@@ -61,15 +61,12 @@ inline int FrameLimit::combined_sleep(int64_t ns)
     return status;
 }
 
-void FrameLimit::sleep(bool fgActive)
+void FrameLimit::sleep(uint32_t outputMultiplier)
 {
-    if (auto fpsCap = Config::Instance()->FramerateLimit.value_or_default(); fpsCap != 0.0f)
+    if (const uint64_t min_interval_us =
+            FrameLimitPolicy::MinIntervalUs(Config::Instance()->FramerateLimit.value_or_default(), outputMultiplier);
+        min_interval_us != 0)
     {
-        uint64_t min_interval_us = std::clamp((uint64_t) (1'000'000 / fpsCap), 0ULL, 100'000'000ULL);
-
-        if (fgActive)
-            min_interval_us *= 2;
-
         static uint64_t previous_frame_time = 0;
         uint64_t current_time = get_timestamp();
         uint64_t frame_time = current_time - previous_frame_time;

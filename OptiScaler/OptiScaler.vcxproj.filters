@@ -326,6 +326,9 @@
     <ClInclude Include="misc\FrameLimit.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="misc\FrameLimitPolicy.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="inputs\FfxApi_Vk.h">
       <Filter>Header Files</Filter>
     </ClInclude>
