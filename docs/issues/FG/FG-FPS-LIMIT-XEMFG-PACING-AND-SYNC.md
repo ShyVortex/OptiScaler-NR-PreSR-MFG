@@ -269,11 +269,10 @@ v0.9.87-pre3 (Lost Soul Aside, 4X, Windows, maintainer):
 - Uncapped: frame delivery and pacing good.
 - Cap 120: 120 out, base 30, even pacing.
 - Alt-tab: the cap dropped to 110–112 and a reset did not apply until the next alt-tab (4.2.1, fixed in task 10).
+- dlssg_sm86 in External FG mode: the menu shows the note and greys out the FPS limit controls, as intended.
 
-Each task adds its unit test. Remaining in-game checks:
-- Lost Soul Aside, 4X, OptiScaler cap 120:
-  - even spacing (about 8.33 ms between presents);
-  - the cap survives alt-tab and resize.
-- Uncapped: behaviour unchanged. The unit tests model the 71.4 fps lock case; Helldivers 2 can no longer be used in game
-  (it now ships Easy Anti-Cheat).
-- dlssg_sm86 in External mode.
+Each task adds its unit test. Remaining in-game checks (v0.9.87-pre4):
+- Lost Soul Aside, 4X, OptiScaler cap 120: the cap stays at 120 across alt-tabs, and a reset applies at once.
+- Optional: an XeFG game on Linux with a cap.
+- The unit tests model the 71.4 fps lock case; Helldivers 2 can no longer be used in game (it now ships Easy
+  Anti-Cheat).
