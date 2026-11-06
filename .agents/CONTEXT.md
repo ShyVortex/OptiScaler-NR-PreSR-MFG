@@ -155,5 +155,5 @@ Every implementation plan created for the project must document:
   - Multiplier ceiling uncap to 5 maintained in memory; `SetInterpolatedFrameCount(targetCount)` dynamically binds the target multiplier on frame 1 without manual interaction.
 - **Quirks & Borderless Toggle**:
   - `QUIRK_ENTRY("helldivers2.exe", GameQuirk::ForceBorderlessWhenUsingXeFG)` in `Quirks.h` and elevated `ForceBorderless` checkbox in GUI and INI ensure flip-model borderless swapchains without globally forcing borderless.
-- **Unit Tests**: Validated by `tests/xemfg_loader_unit.cpp` (12/12 PASS), `tests/xemfg_menu_exclusion_unit.cpp` (5/5 PASS), `tests/xefg_diagnostic_ring_unit.cpp` (6/6 PASS), `tests/xefg_main_pacing_alignment_unit.cpp` (6/6 PASS), `tests/xefg_pacing_engine_unit.cpp` (7/7 PASS), and `tests/xemfg_multiplier_and_burst_pacing_unit.cpp` (16/16 PASS).
+- **Unit Tests**: Validated by `tests/xemfg_loader_unit.cpp` (12/12 PASS), `tests/xemfg_menu_exclusion_unit.cpp` (5/5 PASS), `tests/xefg_diagnostic_ring_unit.cpp` (6/6 PASS), `tests/xefg_main_pacing_alignment_unit.cpp` (6/6 PASS), `tests/xefg_pacing_engine_unit.cpp` (7/7 PASS), `tests/xemfg_multiplier_and_burst_pacing_unit.cpp` (16/16 PASS), and `tests/xefg_2x_render_time_unit.cpp` (8/8 PASS; 2X measures its last frame without pacing it, DLSS Unlocked #64).
 

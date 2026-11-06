@@ -213,6 +213,12 @@ description: Architecture, frame generation, and safety rules for OptiScaler
          - Space Base Frame presents (`0x220A52` / `0x220DAD`) by 1 step from Frame $\text{count}$ (`LastFrameCallerRva = 0x220467`) and accumulate sleep into `g_burstBlockQpc`, guaranteeing Frame $\text{count}$ is never overwritten in 0.3 ms.
          - Anti-clump protection in `ApplyAntiClumpProtection` clamps consecutive presents to the minimum floor ($\ge 1.5\text{ ms}$) without stalling the main thread for whole frame intervals.
          - Fall back to `g_periodNs` in `NoteFrame` when inter-frame intervals collapse under 1 ms to prevent zeroed frame render time reporting.
+         - **2X must measure, never pace, its last frame (verified in-game, God of War, [DLSS Unlocked #64](https://github.com/ShyVortex/DLSS-Unlocked/issues/64))**:
+           - At 2X the only generated frame is the last one. When the provider's scheduler is usable, `TryPace` must call `NoteFrame` for it (`XeFGPacingPolicy::MeasureOnlyLastFrame`) and return: no `PaceFrame`, no `WaitUntil`.
+           - Without that call the render time is never sampled at 2X. `Dispatch` then feeds `_ftDelta`, which includes XeFG's own wait, and 2X runs near the no-FG frame rate.
+           - Never let the last frame fall through to `PaceFrame` while the scheduler is usable: XeFG already schedules it, and the second wait was reverted twice (`fd8f6741`, `9e593639`).
+           - `NoteFrame` computes the render time only through `XeFGPacingPolicy::PureRenderNs`.
+           - Documentation: `docs/issues/FG/FG-XEMFG-2X-RENDER-TIME-NOT-MEASURED.md`. Associated test: `tests/xefg_2x_render_time_unit.cpp`.
      - **Multiplier Ceiling Uncap (`XeFG_Dx12.cpp`)**:
        - `_maxInterpolationCount` must be initialized to `std::max(_maxInterpolationCount, 5)` in `CreateSwapchain` / `CreateSwapchain1` when `XeMfgLoader::EnabledForSession()`.
        - `SetInterpolatedFrameCount` and `Dispatch` must compute `effectiveMax` via `std::max(_maxInterpolationCount, XeMfgLoader::EffectiveMax(_maxInterpolationCount))` rather than stock ceiling 1, dynamically raising `_maxInterpolationCount` and synchronizing `XeMfgLoader::SetMaxGeneratedFrames(count)` live.
@@ -283,5 +289,6 @@ description: Architecture, frame generation, and safety rules for OptiScaler
        - `tests/xemfg_sr_parity_unit.cpp` (Tests 1–6)
        - `tests/xemfg_sr_unit.cpp` (Tests 1–11)
        - `tests/xefg_menu_multiplier_queue_unit.cpp` (Tests 1–7)
+       - `tests/xefg_2x_render_time_unit.cpp` (Tests 1–8)
 
 
