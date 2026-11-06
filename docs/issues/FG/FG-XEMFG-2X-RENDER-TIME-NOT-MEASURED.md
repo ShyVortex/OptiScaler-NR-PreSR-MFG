@@ -12,7 +12,8 @@
     `FGOutput=XeFG`; XeSS-FG provider 1.3.1.78, 5/5 XeMFG patches, 3/3 pacing thunks hooked.
 - **Analysis environment** (verified by command): CachyOS, kernel 7.3.1-1-cachyos, NVIDIA GeForce RTX 3080 Ti
   Laptop GPU, driver 580.196.07; GCC 16.2.1, clang-format 23.1.4.
-- **Fix**: `4e513fb7` on `fix/xemfg-2x-render-time`.
+- **Fix**: `4e513fb7` on `fix/xemfg-2x-render-time`, first shipped in test build v0.9.87-pre1. Confirmed in game by
+  the reporter (section 7).
 
 ## 2. Reported Symptoms
 
@@ -116,6 +117,8 @@ branch of `Detour` active at 2X. That was already true before the fix and is not
 - clang-format 23.1.4 clean; UTF-8 BOM present on all modified C++ and project files.
 - `XeFGPacing.h` passes a clang syntax check with a stub `windows.h`. The only error is the existing
   `std::clamp(int64_t, long long)` in `TsDetour`, which only occurs where `int64_t` is `long` (Linux), not on MSVC.
-- **In game: pending.**
-  - Expected: XeMFG 2X from launch reaches the frame rate of the slider workaround.
-  - Expected: `real frame` in the pacing stats changes with the scene instead of staying at 0.00 or a frozen value.
+- **In game: confirmed by the reporter on 2026-11-05.**
+  - Build: OptiScaler v0.9.87-pre1 (CI test build containing `4e513fb7`).
+  - God of War does not load OptiScaler as `dxgi.dll`, so the reporter loaded it as `winmm.dll`.
+  - Result: "XeMFG 2X is working properly and now runs every time the game starts", without the 3X → 2X slider
+    workaround.
