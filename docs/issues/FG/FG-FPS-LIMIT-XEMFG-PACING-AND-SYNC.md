@@ -243,5 +243,6 @@ Pending. Each task adds its unit test. In-game checks:
 - Lost Soul Aside, 4X, OptiScaler cap 120:
   - even spacing (about 8.33 ms between presents);
   - the cap survives alt-tab and resize.
-- Uncapped: no return of the 71.4 fps lock (Helldivers 2 at 6X).
+- Uncapped: behaviour unchanged. The unit tests model the 71.4 fps lock case; Helldivers 2 can no longer be used in game
+  (it now ships Easy Anti-Cheat).
 - dlssg_sm86 in External mode.
