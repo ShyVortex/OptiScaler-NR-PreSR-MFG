@@ -219,6 +219,31 @@ description: Architecture, frame generation, and safety rules for OptiScaler
            - Never let the last frame fall through to `PaceFrame` while the scheduler is usable: XeFG already schedules it, and the second wait was reverted twice (`fd8f6741`, `9e593639`).
            - `NoteFrame` computes the render time only through `XeFGPacingPolicy::PureRenderNs`.
            - Documentation: `docs/issues/FG/FG-XEMFG-2X-RENDER-TIME-NOT-MEASURED.md`. Associated test: `tests/xefg_2x_render_time_unit.cpp`.
+         - **OptiScaler FPS limit with XeMFG (verified in-game on Windows, Lost Soul Aside 4X, v0.9.87-pre4)**:
+           - **Spacing under a cap.** The step is `XeFGPacingPolicy::StepNs` / `IntervalNs`: the pure-render step floored to the cap interval (1 / limit). It is used in `TsDetour` and for `g_intervalQpc`.
+             - `XeFG_Dx12::Present` feeds the cap every frame through `XeFGPacing::SetOutputCapFps(FpsLimitSync::OutputCapFps(...))`; it is 0 in External FG mode.
+             - Without a cap the step must stay exactly the pure-render value.
+             - Never floor with the provider median: that is the resonant lock.
+             - Even spacing needs the pure render time ≤ 1 / limit. Uncapped bursts stay squeezed by design: the pacing waits block the engine thread.
+           - **Re-sync.** `ReflexHooks` resends the limit whenever the route (`IsXeFGActive()`: driver vs fakenvapi) or XeLL context generation changes (`FpsLimitSync::NeedsResend`, `ReflexHooks::lowLatencyContextChanged()` after `CreateSwapchainContext`).
+             - XeFG starts a new XeLL context with `ReflexHooks::minimumIntervalUs()`, never 0.
+             - `XeLL::set_sleep_mode` keeps its last-sent cache per instance, never in function statics.
+           - **One backend holds the limit.** While the route is fakenvapi, the driver gets the game's own interval back (`FpsLimitSync::ClearDriverLimit`, tracked by `_driverOptiIntervalUs`).
+             - The driver keeps enforcing a Reflex limit it got during an alt-tab (`eOff`), even after XeFG resumes. Two limiters gave 112 instead of 120, and a reset did not apply.
+             - Never call fakenvapi while XeFG is inactive.
+             - With OptiScaler's limit at 0, send the game's own interval (`FpsLimitSync::IntervalToSend`), never 0 over it.
+           - **Fallback limiter.** `FrameLimit::sleep` takes the output multiplier (`FrameLimitPolicy::OutputMultiplier` from `GetInterpolatedFrameCount()`), never a fixed ×2.
+           - **External FG mode.** No limiter sleep in `Present`, `Present1` or `hkvkQueuePresentKHR` (`FrameLimitPolicy::AppliesInMode`).
+             - The menu shows "None (External FG mode)" and the RTSS / in-game-limit note, and disables the controls; the VRR calculator stays usable.
+             - Reflex limiting stays off there (upstream `a60f3c93`).
+           - **Frame-count flapping.** `_FgNumFramesToGenerate` resets on stale async markers only if the game has sent any (`FpsLimitSync::AsyncMarkersStopped`).
+           - **Game's own XeLL context** (`Xell_Hooks.cpp`).
+             - `gamesContextCanLimitFps` is re-evaluated every frame (`GameXellCanLimit`) and cleared on destroy and on blocking.
+             - The limit is pushed per context, and injected into the game's own `xellSetSleepMode` calls.
+           - **Linux / DXVK (unit tests only, not yet verified in game).** For D3D swapchains on DXVK the Vulkan present hook does not call `ReflexHooks::update` (`FpsLimitSync::VulkanPresentDrivesReflex`).
+             - Its fallback sleep stays: it is the only fallback sleep under DXVK (`48087c67`).
+           - Documentation: `docs/issues/FG/FG-FPS-LIMIT-XEMFG-PACING-AND-SYNC.md`.
+           - Associated tests: `tests/xefg_cap_step_unit.cpp`, `tests/fps_limit_resync_unit.cpp`, `tests/frame_limit_multiplier_unit.cpp`, `tests/fps_limit_external_mode_unit.cpp`, `tests/reflex_fg_count_flap_unit.cpp`, `tests/fps_limit_dxvk_owner_unit.cpp`, `tests/xell_game_context_limit_unit.cpp`.
      - **Multiplier Ceiling Uncap (`XeFG_Dx12.cpp`)**:
        - `_maxInterpolationCount` must be initialized to `std::max(_maxInterpolationCount, 5)` in `CreateSwapchain` / `CreateSwapchain1` when `XeMfgLoader::EnabledForSession()`.
        - `SetInterpolatedFrameCount` and `Dispatch` must compute `effectiveMax` via `std::max(_maxInterpolationCount, XeMfgLoader::EffectiveMax(_maxInterpolationCount))` rather than stock ceiling 1, dynamically raising `_maxInterpolationCount` and synchronizing `XeMfgLoader::SetMaxGeneratedFrames(count)` live.
@@ -290,5 +315,12 @@ description: Architecture, frame generation, and safety rules for OptiScaler
        - `tests/xemfg_sr_unit.cpp` (Tests 1–11)
        - `tests/xefg_menu_multiplier_queue_unit.cpp` (Tests 1–7)
        - `tests/xefg_2x_render_time_unit.cpp` (Tests 1–8)
+       - `tests/xefg_cap_step_unit.cpp` (Tests 1–8)
+       - `tests/fps_limit_resync_unit.cpp` (Tests 1–7)
+       - `tests/frame_limit_multiplier_unit.cpp` (Tests 1–5)
+       - `tests/fps_limit_external_mode_unit.cpp` (Tests 1–5)
+       - `tests/reflex_fg_count_flap_unit.cpp` (Tests 1–5)
+       - `tests/fps_limit_dxvk_owner_unit.cpp` (Tests 1–3)
+       - `tests/xell_game_context_limit_unit.cpp` (Tests 1–5)
 
 

@@ -14,8 +14,8 @@
   - The game's NVIDIA Reflex option was ON. It is locked ON while frame generation is active.
 - **Analysis environment** (verified by command): CachyOS, kernel 7.3.1-1-cachyos, NVIDIA GeForce RTX 3080 Ti Laptop
   GPU 16 GB, driver 580.196.07.
-- **Status**: investigation complete; fixes planned on `fix/fps-limiter-xemfg` (section 6). Nothing confirmed in
-  game yet.
+- **Status**: fixed on `fix/fps-limiter-xemfg` (section 6). Confirmed in game on Windows with v0.9.87-pre4
+  (section 7). The Linux / DXVK change (task 7) is covered by unit tests only.
 
 ## 2. Reported Symptoms
 
@@ -271,8 +271,11 @@ v0.9.87-pre3 (Lost Soul Aside, 4X, Windows, maintainer):
 - Alt-tab: the cap dropped to 110–112 and a reset did not apply until the next alt-tab (4.2.1, fixed in task 10).
 - dlssg_sm86 in External FG mode: the menu shows the note and greys out the FPS limit controls, as intended.
 
-Each task adds its unit test. Remaining in-game checks (v0.9.87-pre4):
-- Lost Soul Aside, 4X, OptiScaler cap 120: the cap stays at 120 across alt-tabs, and a reset applies at once.
-- Optional: an XeFG game on Linux with a cap.
-- The unit tests model the 71.4 fps lock case; Helldivers 2 can no longer be used in game (it now ships Easy
-  Anti-Cheat).
+v0.9.87-pre4 (Lost Soul Aside, 4X, Windows, maintainer): everything works as expected. The cap stays at 120 across
+alt-tabs, and a reset applies at once.
+
+Not covered in game:
+- **Linux.** The Metro 2033 Redux test INI has `OverlayMenu=false`, a workaround for a separate Linux alt-tab crash
+  with frame generation active. Metro has no Reflex, so the Framerate section is hidden there by upstream gating
+  (`state.reflexLimitsFps || OverlayMenu`).
+- **The 71.4 fps lock case.** It is modelled by the unit tests only: Helldivers 2 now ships Easy Anti-Cheat.
