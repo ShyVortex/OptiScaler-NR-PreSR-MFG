@@ -11,7 +11,9 @@
     the D3D11 game is on DXVK and XeFG on vkd3d-proton.
   - OptiScaler v0.9.87-pre4 (`6961c56`), LogLevel 0, `OverlayMenu=auto`.
   - `[XeMFG] UnlockMFG=true`, `Source=OptiScaler`, 4X.
-- **Status**: root cause found in the code; fix planned on `fix/linux-vk-overlay-resize-freeze` (section 5).
+- **Status**: two defects found; fixes on `fix/linux-vk-overlay-resize-freeze` (section 5).
+  - The overlay fix is verified in game: no more GPU fault on F11.
+  - The per-thread flag (4.1) still needs a retest.
 
 ## 2. Reported Symptoms
 
@@ -77,6 +79,33 @@ avoids it only because the Vulkan overlay then never draws.
 The DX overlay does not have the first problem: it passes the backbuffer size to `RenderMenu(framebufferSize)`, and
 `MenuViewport::SetFramebufferScale` maps window coordinates onto the image.
 
+### 4.1 After F11 the game's swapchain is no longer wrapped (found testing v0.9.87-pre5)
+
+With the overlay fix, F11 no longer froze the game, but it could not leave fullscreen, and after several switches it
+hung. Log of v0.9.87-pre5, Metro 2033 Redux, LogLevel 0:
+
+- The game's swapchain was wrapped only at launch (20:47:55): `WrappedIDXGISwapChain4`, `Dx11wDx12SC`, XeFG swapchain.
+- Every swapchain the game created after F11 took `DxgiFactoryHooks::CreateSwapChain Vulkan is creating swapchain!`,
+  which calls the original function and wraps nothing. That happened at 20:48:09, 20:48:49, 20:48:59, 20:49:53 and
+  20:51:59, every time with `Windowed: 0`.
+- From then on the game ran on a plain DXVK swapchain:
+  - no D3D12 bridge and no XeFG swapchain. XeFG never generated a frame in this session: every pacing report is `0X`;
+  - the borderless quirk was bypassed, so the game got the exclusive fullscreen it asked for;
+  - the overlay attached to DXVK's swapchains (device `1A8C150`).
+- After the 20:51:59 recreation OptiScaler logged nothing for 44 s, in the middle of a frame (DLSS evaluate of frame
+  3080). After one more DXVK swapchain at 20:52:43, the process stayed hung at about 145 % CPU.
+- The log is complete: logging is synchronous and flushed after every line (`flush_on(trace)`, `LogAsync` off).
+- Thread stacks were not captured: `ptrace_scope` is 1.
+
+Cause: `State::vulkanCreatingSC` was a process-wide flag.
+- `ScopedVulkanCreatingSC` sets it for the whole `vkQueuePresentKHR` and `vkCreateSwapchainKHR` hooks
+  (`Vulkan_Hooks.cpp`). Its purpose is that a DXGI swapchain created inside them, on the same thread, is not wrapped.
+- On Linux DXVK presents from its own thread, almost continuously. The game's thread, creating its swapchain at that
+  moment, saw the flag, and its swapchain was treated as an OptiScaler-internal one.
+- On Windows the game's presents do not go through these Vulkan hooks, so the race cannot happen there.
+- The flag dates from `03126e4c`; it was not introduced by the overlay fix.
+- The 44 s hang is attributed to the same cause, but without thread stacks this is not proven.
+
 ## 5. Planned Solution
 
 On `fix/linux-vk-overlay-resize-freeze`:
@@ -88,6 +117,10 @@ On `fix/linux-vk-overlay-resize-freeze`:
   - set `renderArea` to the stored extent. The viewport and scissors then stay inside the image whatever size the
     window has.
 - The decisions go in a pure header (`menu/MenuOverlayVkPolicy.h`) with a unit test.
+- `CreateVulkanObjects` refuses more than 8 swapchain images (fixed-size array). It grows the per-image arrays, zeroed,
+  only when a swapchain has more images, instead of allocating them again on every recreation.
+- 4.1: `State::vulkanCreatingSC` is `static inline thread_local`. Same-thread nesting keeps working; the game's thread no
+  longer sees a present thread's flag. Test: `tests/vulkan_creating_sc_thread_unit.cpp`.
 - Unchanged: when the overlay is created and destroyed, the DX overlay, and the `OverlayMenu` defaults.
 
 Related history:
@@ -97,6 +130,15 @@ Related history:
 
 ## 6. Verification
 
-Pending: unit test with the fix, then in game on Linux.
-- Metro 2033 Redux with XeMFG and `OverlayMenu=auto`: F11 and alt-tab several times, with the menu open and closed.
-- No freeze, and the menu still renders and takes input after each switch.
+Unit tests: `tests/vk_overlay_resize_unit.cpp` (5/5), `tests/vulkan_creating_sc_thread_unit.cpp` (4/4).
+
+v0.9.87-pre5 (overlay fix only), Metro 2033 Redux, Linux, maintainer:
+- F11 no longer freezes the game.
+- No new NVIDIA Xid in the kernel log.
+- The fullscreen problem and the later hang come from 4.1.
+
+Still to check, with the per-thread flag: Metro 2033 Redux with XeMFG and `OverlayMenu=auto`.
+- F11 and alt-tab several times, with the menu open and closed.
+- After every switch the swapchain is wrapped again: `Dx11wDx12SC ... created` and `XeFG swapchain created`, never
+  `Vulkan is creating swapchain!` for the game's own swapchain.
+- Fullscreen can be left again, FG keeps running (`4X` pacing reports), and the menu still renders and takes input.

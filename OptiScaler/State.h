@@ -322,7 +322,11 @@ class State
     WorkingMode workingMode = WorkingMode::Other;
 
     // Vulkan stuff
-    bool vulkanCreatingSC = false;
+    // Per thread: set by OptiScaler's Vulkan hooks (vkQueuePresentKHR, vkCreateSwapchainKHR) so that a DXGI swapchain
+    // created inside them, on the same thread, is not wrapped. As a process-wide flag, DXVK's present thread held it
+    // while the game's thread created its own swapchain, so on Linux the game's swapchains after F11 / alt-tab were
+    // never wrapped (no Dx11wDx12 bridge, no XeFG, no borderless quirk; FG-LINUX-VK-OVERLAY-RESIZE-FREEZE.md).
+    static inline thread_local bool vulkanCreatingSC = false;
     bool creatingD3DDevice = false;
     bool vulkanSkipHooks = false;
     VkInstance VulkanInstance = nullptr;
