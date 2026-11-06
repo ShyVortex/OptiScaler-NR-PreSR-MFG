@@ -29,4 +29,13 @@ constexpr uint64_t MinIntervalUs(float limitFps, uint32_t outputMultiplier)
 
     return intervalUs * (outputMultiplier > 0 ? outputMultiplier : 1);
 }
+
+// External FG mode (dlssg_sm86 and other game-owned frame generation): the game's DLSS-G presents and paces the
+// generated frames. A sleep in Present lands on that path and fights its pacing, and Reflex limiting is off in that
+// mode (a60f3c93), so OptiScaler applies no FPS limit there (FG-FPS-LIMIT-XEMFG-PACING-AND-SYNC.md, section 4.4).
+constexpr bool AppliesInMode(bool externalFrameGeneration) { return !externalFrameGeneration; }
+
+inline constexpr const char* ExternalModeMethod = "None (External FG mode)";
+inline constexpr const char* ExternalModeMessage =
+    "OptiScaler's FPS limit is not available in External FG mode.\nUse RTSS or the game's own frame limit.";
 } // namespace FrameLimitPolicy

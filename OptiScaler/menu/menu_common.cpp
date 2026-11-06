@@ -49,6 +49,7 @@
 #include <memory>
 #include <type_traits>
 #include <misc/IdentifyGpu.h>
+#include <misc/FrameLimitPolicy.h>
 #include <hooks/Xell_Hooks.h>
 #include <hooks/GameXeFG_Hooks.h>
 #include <low_latency/input/input_common.h>
@@ -6312,7 +6313,13 @@ void MenuCommon::RenderFramerateSettings(RenderMenuContext& ctx)
 
         static std::string currentMethod {};
         LowLatencyMode fakenvapiMode = {};
-        if (state.reflexLimitsFps)
+        const bool limitAvailable = FrameLimitPolicy::AppliesInMode(state.externalFrameGeneration);
+
+        if (!limitAvailable)
+        {
+            currentMethod = FrameLimitPolicy::ExternalModeMethod;
+        }
+        else if (state.reflexLimitsFps)
         {
             fakenvapiMode = fakenvapi::getCurrentMode();
 
@@ -6368,6 +6375,15 @@ void MenuCommon::RenderFramerateSettings(RenderMenuContext& ctx)
             ImGui::Spacing();
         }
 
+        // External FG mode never applies the limit: say so, and keep the controls visible but disabled.
+        if (!limitAvailable)
+        {
+            ImGui::TextColored(toneMapColor(ImVec4(1.f, 0.8f, 0.f, 1.f)), "%s", FrameLimitPolicy::ExternalModeMessage);
+            ImGui::Spacing();
+        }
+
+        ImGui::BeginDisabled(!limitAvailable);
+
         // set initial value
         if (std::isinf(_limitFps))
             _limitFps = config->FramerateLimit.value_or_default();
@@ -6386,6 +6402,8 @@ void MenuCommon::RenderFramerateSettings(RenderMenuContext& ctx)
             _limitFps = 0.0f;
             config->FramerateLimit = _limitFps;
         }
+
+        ImGui::EndDisabled();
 
         ImGui::Spacing();
         if (auto ch = ScopedCollapsingHeader("VRR Frame Cap Calculator"); ch.IsHeaderOpen())
@@ -6410,11 +6428,16 @@ void MenuCommon::RenderFramerateSettings(RenderMenuContext& ctx)
 
             ImGui::SameLine(0.0f, 16.0f);
 
+            // The calculator stays usable in External FG mode (a value for RTSS); only applying it is disabled.
+            ImGui::BeginDisabled(!limitAvailable);
+
             if (ImGui::Button("Set as FPS Limit"))
             {
                 _limitFps = frameCap;
                 config->FramerateLimit = _limitFps;
             }
+
+            ImGui::EndDisabled();
         }
     }
 }

@@ -335,7 +335,8 @@ static VkResult hkvkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* pPres
     auto result = o_QueuePresentKHR(queue, &localPresentInfo);
 
     // Unsure about Vulkan Reflex fps limit and if that could be causing an issue here
-    if (!State::Instance().reflexLimitsFps)
+    if (!State::Instance().reflexLimitsFps &&
+        FrameLimitPolicy::AppliesInMode(State::Instance().externalFrameGeneration))
         FrameLimit::sleep(1);
 
     LOG_FUNC_RESULT(result);
