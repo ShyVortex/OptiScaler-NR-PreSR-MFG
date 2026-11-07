@@ -1,5 +1,6 @@
-#pragma once
+﻿#pragma once
 #include "SysUtils.h"
+#include "FrameLimitPolicy.h"
 
 class FrameLimit
 {
@@ -9,5 +10,6 @@ class FrameLimit
     static int combined_sleep(int64_t ns);
 
   public:
-    static void sleep(bool fgActive);
+    // outputMultiplier: presented frames per call (1 without frame generation; see FrameLimitPolicy::OutputMultiplier).
+    static void sleep(uint32_t outputMultiplier);
 };

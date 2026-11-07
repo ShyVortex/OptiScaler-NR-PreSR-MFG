@@ -302,6 +302,9 @@
     <ClInclude Include="menu\menu_overlay_vk.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="menu\MenuOverlayVkPolicy.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="OwnedMutex.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -324,6 +327,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="misc\FrameLimit.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="misc\FrameLimitPolicy.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="inputs\FfxApi_Vk.h">
@@ -588,6 +594,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="hooks\GameXeFGBlockPolicy.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="hooks\FpsLimitSync.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="hooks\GameXeFG_Hooks.h">

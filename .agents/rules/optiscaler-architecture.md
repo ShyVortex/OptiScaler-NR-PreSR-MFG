@@ -219,6 +219,31 @@ description: Architecture, frame generation, and safety rules for OptiScaler
            - Never let the last frame fall through to `PaceFrame` while the scheduler is usable: XeFG already schedules it, and the second wait was reverted twice (`fd8f6741`, `9e593639`).
            - `NoteFrame` computes the render time only through `XeFGPacingPolicy::PureRenderNs`.
            - Documentation: `docs/issues/FG/FG-XEMFG-2X-RENDER-TIME-NOT-MEASURED.md`. Associated test: `tests/xefg_2x_render_time_unit.cpp`.
+         - **OptiScaler FPS limit with XeMFG (verified in-game on Windows, Lost Soul Aside 4X, v0.9.87-pre4)**:
+           - **Spacing under a cap.** The step is `XeFGPacingPolicy::StepNs` / `IntervalNs`: the pure-render step floored to the cap interval (1 / limit). It is used in `TsDetour` and for `g_intervalQpc`.
+             - `XeFG_Dx12::Present` feeds the cap every frame through `XeFGPacing::SetOutputCapFps(FpsLimitSync::OutputCapFps(...))`; it is 0 in External FG mode.
+             - Without a cap the step must stay exactly the pure-render value.
+             - Never floor with the provider median: that is the resonant lock.
+             - Even spacing needs the pure render time ≤ 1 / limit. Uncapped bursts stay squeezed by design: the pacing waits block the engine thread.
+           - **Re-sync.** `ReflexHooks` resends the limit whenever the route (`IsXeFGActive()`: driver vs fakenvapi) or XeLL context generation changes (`FpsLimitSync::NeedsResend`, `ReflexHooks::lowLatencyContextChanged()` after `CreateSwapchainContext`).
+             - XeFG starts a new XeLL context with `ReflexHooks::minimumIntervalUs()`, never 0.
+             - `XeLL::set_sleep_mode` keeps its last-sent cache per instance, never in function statics.
+           - **One backend holds the limit.** While the route is fakenvapi, the driver gets the game's own interval back (`FpsLimitSync::ClearDriverLimit`, tracked by `_driverOptiIntervalUs`).
+             - The driver keeps enforcing a Reflex limit it got during an alt-tab (`eOff`), even after XeFG resumes. Two limiters gave 112 instead of 120, and a reset did not apply.
+             - Never call fakenvapi while XeFG is inactive.
+             - With OptiScaler's limit at 0, send the game's own interval (`FpsLimitSync::IntervalToSend`), never 0 over it.
+           - **Fallback limiter.** `FrameLimit::sleep` takes the output multiplier (`FrameLimitPolicy::OutputMultiplier` from `GetInterpolatedFrameCount()`), never a fixed ×2.
+           - **External FG mode.** No limiter sleep in `Present`, `Present1` or `hkvkQueuePresentKHR` (`FrameLimitPolicy::AppliesInMode`).
+             - The menu shows "None (External FG mode)" and the RTSS / in-game-limit note, and disables the controls; the VRR calculator stays usable.
+             - Reflex limiting stays off there (upstream `a60f3c93`).
+           - **Frame-count flapping.** `_FgNumFramesToGenerate` resets on stale async markers only if the game has sent any (`FpsLimitSync::AsyncMarkersStopped`).
+           - **Game's own XeLL context** (`Xell_Hooks.cpp`).
+             - `gamesContextCanLimitFps` is re-evaluated every frame (`GameXellCanLimit`) and cleared on destroy and on blocking.
+             - The limit is pushed per context, and injected into the game's own `xellSetSleepMode` calls.
+           - **Linux / DXVK (unit tests only, not yet verified in game).** For D3D swapchains on DXVK the Vulkan present hook does not call `ReflexHooks::update` (`FpsLimitSync::VulkanPresentDrivesReflex`).
+             - Its fallback sleep stays: it is the only fallback sleep under DXVK (`48087c67`).
+           - Documentation: `docs/issues/FG/FG-FPS-LIMIT-XEMFG-PACING-AND-SYNC.md`.
+           - Associated tests: `tests/xefg_cap_step_unit.cpp`, `tests/fps_limit_resync_unit.cpp`, `tests/frame_limit_multiplier_unit.cpp`, `tests/fps_limit_external_mode_unit.cpp`, `tests/reflex_fg_count_flap_unit.cpp`, `tests/fps_limit_dxvk_owner_unit.cpp`, `tests/xell_game_context_limit_unit.cpp`.
      - **Multiplier Ceiling Uncap (`XeFG_Dx12.cpp`)**:
        - `_maxInterpolationCount` must be initialized to `std::max(_maxInterpolationCount, 5)` in `CreateSwapchain` / `CreateSwapchain1` when `XeMfgLoader::EnabledForSession()`.
        - `SetInterpolatedFrameCount` and `Dispatch` must compute `effectiveMax` via `std::max(_maxInterpolationCount, XeMfgLoader::EffectiveMax(_maxInterpolationCount))` rather than stock ceiling 1, dynamically raising `_maxInterpolationCount` and synchronizing `XeMfgLoader::SetMaxGeneratedFrames(count)` live.
@@ -290,5 +315,23 @@ description: Architecture, frame generation, and safety rules for OptiScaler
        - `tests/xemfg_sr_unit.cpp` (Tests 1–11)
        - `tests/xefg_menu_multiplier_queue_unit.cpp` (Tests 1–7)
        - `tests/xefg_2x_render_time_unit.cpp` (Tests 1–8)
+       - `tests/xefg_cap_step_unit.cpp` (Tests 1–8)
+       - `tests/fps_limit_resync_unit.cpp` (Tests 1–7)
+       - `tests/frame_limit_multiplier_unit.cpp` (Tests 1–5)
+       - `tests/fps_limit_external_mode_unit.cpp` (Tests 1–5)
+       - `tests/reflex_fg_count_flap_unit.cpp` (Tests 1–5)
+       - `tests/fps_limit_dxvk_owner_unit.cpp` (Tests 1–3)
+       - `tests/xell_game_context_limit_unit.cpp` (Tests 1–5)
 
-
+9. **Linux / Proton: Vulkan Menu Overlay and Swapchain Wrapping (verified in-game, Metro 2033 Redux on Linux, v0.9.87-pre5 / pre6)**:
+   - On Proton, D3D games present through DXVK / vkd3d-proton, so OptiScaler's Vulkan hooks (`Vulkan_Hooks.cpp`, `MenuOverlayVk`) also see D3D games' presents, from DXVK's / vkd3d-proton's own threads. A window resize (F11, alt-tab) reaches the window long before those layers recreate their Vulkan swapchains.
+   - **The Vulkan overlay stays inside its swapchain images (`OptiScaler/menu/menu_overlay_vk.cpp`, `OptiScaler/menu/MenuOverlayVkPolicy.h`)**:
+     - Render at the image size stored when the framebuffers were built: pass it to `MenuOverlayBase::RenderMenu(framebufferSize)` (the DX overlay's path) and use it as the render pass area. Never use `io.DisplaySize` (the window size, set every frame by `ImGui_ImplWin32_NewFrame`) for the render area: after F11 the menu drew past the image (NVIDIA Xid 13 "3D HEIGHT CT Violation", `VK_ERROR_DEVICE_LOST`, frozen game).
+     - Draw only on the swapchain the framebuffers belong to, with an image index below its image count (`MenuOverlayVkPolicy::ShouldDraw`). With the `Dx11wDx12` bridge there are swapchains on two devices (DXVK and vkd3d-proton).
+     - `CreateVulkanObjects` refuses more than `MaxImages` (8) images and grows the per-image arrays only when needed, zeroed; never allocate them again on every recreation.
+   - **`State::vulkanCreatingSC` is per thread (`static inline thread_local`, `OptiScaler/State.h`)**:
+     - `ScopedVulkanCreatingSC` sets it for the whole `vkQueuePresentKHR` / `vkCreateSwapchainKHR` hooks so that a DXGI swapchain created inside them, on the same thread, is not wrapped.
+     - Never make it process-wide again: DXVK's present thread held it while the game's thread created its swapchain, so after F11 the game's swapchain took the "Vulkan is creating swapchain!" path. It was never wrapped: no `Dx11wDx12` bridge, no XeFG, no borderless quirk, and fullscreen could not be left.
+   - Debugging a hang under Proton: `winedbg` of the game's own Proton build gives Windows-side backtraces (module + offset). `protontricks` may use a mismatched Wine and fail; `eu-stack` cannot unwind Windows modules. Use `WINEPREFIX=<compatdata>/pfx "<Proton>/files/bin/wine" winedbg --command "bt all" 0x<wpid>`.
+   - Not OptiScaler: a few quick F11 presses can still hang Metro 2033 Redux on Linux. It reproduces in vanilla Metro (no OptiScaler, MangoHud and Steam overlay off, Proton-CachyOS and GE-Proton, with and without fsync): Wine's `winevulkan` `signaller_worker` times out after a swapchain recreation and DXVK reports `VK_ERROR_DEVICE_LOST` (issue doc section 4.2). Do not "fix" it in OptiScaler; skipping the `Dx11wDx12` bridge's hidden D3D11 present was tried (`3077cf0b`) and reverted.
+   - Documentation: `docs/issues/FG/FG-LINUX-VK-OVERLAY-RESIZE-FREEZE.md`. Associated tests: `tests/vk_overlay_resize_unit.cpp`, `tests/vulkan_creating_sc_thread_unit.cpp`.

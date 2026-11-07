@@ -77,7 +77,8 @@ bool XeFG_Dx12::CreateSwapchainContext(ID3D12Device* device)
             xell_sleep_params_t sleepParams = {};
             sleepParams.bLowLatencyMode = true;
             sleepParams.bLowLatencyBoost = false;
-            sleepParams.minimumIntervalUs = 0;
+            // Start the new context with the current limit: it would otherwise run uncapped until the next resend.
+            sleepParams.minimumIntervalUs = ReflexHooks::minimumIntervalUs();
 
             auto xellResult =
                 XeLLProxy::SetSleepMode()((xell_context_handle_t) fakenvapi::getCurrentContext(), &sleepParams);
@@ -94,6 +95,9 @@ bool XeFG_Dx12::CreateSwapchainContext(ID3D12Device* device)
                 LOG_ERROR("SetLatencyReduction error: {} ({})", magic_enum::enum_name(result), (UINT) result);
                 return false;
             }
+
+            // The limit was delivered to the previous context; have ReflexHooks resend it to this one.
+            ReflexHooks::lowLatencyContextChanged();
         }
 #else
         InputXeLL::xell_input_handle_t localXellContext;
@@ -104,7 +108,8 @@ bool XeFG_Dx12::CreateSwapchainContext(ID3D12Device* device)
             xell_sleep_params_t sleepParams = {};
             sleepParams.bLowLatencyMode = true;
             sleepParams.bLowLatencyBoost = false;
-            sleepParams.minimumIntervalUs = 0;
+            // Start the new context with the current limit: it would otherwise run uncapped until the next resend.
+            sleepParams.minimumIntervalUs = ReflexHooks::minimumIntervalUs();
 
             auto xellResult = InputXeLL::SetSleepMode(localXellContext, &sleepParams);
             if (xellResult != XELL_RESULT_SUCCESS)
@@ -120,6 +125,8 @@ bool XeFG_Dx12::CreateSwapchainContext(ID3D12Device* device)
                 LOG_ERROR("SetLatencyReduction error: {} ({})", magic_enum::enum_name(result), (UINT) result);
                 return false;
             }
+
+            ReflexHooks::lowLatencyContextChanged();
         }
 #endif
         else
@@ -1566,6 +1573,11 @@ bool XeFG_Dx12::Present()
     const int pendingCount = _pendingInterpolationCount.exchange(-1, std::memory_order_acq_rel);
     if (pendingCount >= 0)
         SetInterpolatedFrameCount(static_cast<UINT>(pendingCount));
+
+    // Generated frames are spaced at least one cap interval apart, so a capped burst fills the base frame
+    // (FG-FPS-LIMIT-XEMFG-PACING-AND-SYNC.md, section 4.1).
+    XeFGPacing::SetOutputCapFps(FpsLimitSync::OutputCapFps(Config::Instance()->FramerateLimit.value_or_default(),
+                                                           State::Instance().externalFrameGeneration));
 
     if (_passthrough)
     {

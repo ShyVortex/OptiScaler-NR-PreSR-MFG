@@ -1,9 +1,12 @@
-#pragma once
+﻿#pragma once
 #include <d3d12.h>
 #include <nvapi/NvApiTypes.h>
 
 #include "Hook_Utils.h"
+#include "FpsLimitSync.h"
 #include "low_latency/ll_util.h"
+
+#include <atomic>
 
 enum TimingType : uint32_t
 {
@@ -34,6 +37,14 @@ class ReflexHooks
     inline static HANDLE _lastVkSleepDev = nullptr;
 
     inline static std::thread::id _lastSetSleepThread {};
+
+    // Which D3D backend last received the limit, and the low-latency context generation it reached
+    // (FG-FPS-LIMIT-XEMFG-PACING-AND-SYNC.md, section 4.2).
+    inline static FpsLimitSync::Pushed _lastPushed {};
+
+    // OptiScaler interval the driver last received (0 = none): cleared while fakenvapi carries the limit.
+    inline static uint32_t _driverOptiIntervalUs = 0;
+    inline static std::atomic<uint32_t> _lowLatencyGeneration { 0 };
 
     // D3D
     inline static decltype(&NvAPI_D3D_SetSleepMode) o_NvAPI_D3D_SetSleepMode = nullptr;
@@ -86,4 +97,10 @@ class ReflexHooks
 
     // 0 - disables the fps cap
     static void setFPSLimit(float fps);
+
+    // OptiScaler's current Reflex minimumIntervalUs (0 = no OptiScaler limit).
+    static uint32_t minimumIntervalUs();
+
+    // A new low-latency context took over (XeFG's forced XeLL): the next update resends the limit to it.
+    static void lowLatencyContextChanged();
 };

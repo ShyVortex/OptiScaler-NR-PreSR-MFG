@@ -1,5 +1,16 @@
 # Frame Generation: Intel XeMFG / XeMFG-SR 71.4 FPS Resonant Lock Elimination, Timing Decoupling & Double-Pacing Deduplication
 
+> **Correction (2026-11-06):**
+> - **Still holds:** the lock analysis below. Stepping by the provider median feeds our own waits back into the next
+>   step, and stepping by pure render time breaks that loop.
+> - **Does not hold:** the claim that bursts are uniformly spaced (Test 13, section 5.1). Pure render time leaves out
+>   the time the engine thread waits on XeFG, so the step is shorter than the real base interval ÷ multiplier.
+>   - Lost Soul Aside 4X uncapped: `ring 8.0 ms`, `med 18.4 ms`; presents about 3 / 4.5 / 4.3 / 6.3 ms apart.
+>   - Under a 120 cap: about 16 / 9 / 4 / 4 ms.
+> - **Why the Linux confirmations did not show it:** OptiScaler's Vulkan-side fallback limiter re-spaces every real
+>   present under Proton, which would hide squeezed bursts whenever an OptiScaler cap was set.
+> - See [FG-FPS-LIMIT-XEMFG-PACING-AND-SYNC.md](FG-FPS-LIMIT-XEMFG-PACING-AND-SYNC.md), section 4.1.
+
 ## 1. Overview & Environment
 
 - **Operating System**: CachyOS Linux x86_64 (Rolling release, ID: `cachyos`, ID_LIKE: `arch`)
