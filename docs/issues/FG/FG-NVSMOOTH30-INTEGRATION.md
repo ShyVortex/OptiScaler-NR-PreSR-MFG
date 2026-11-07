@@ -403,3 +403,45 @@ This guarantees that extended Windows interfaces (`IDXGISwapChainMedia`) and pro
   `dlssg_sm86_v030_ini_unit` still pass. clang-format 23 clean; UTF-8 BOM present.
 - **Expected in game (not yet checked):** the refusal line in `OptiScaler.log`; a `WrappedIDXGISwapChain4` created
   without `amd_fidelityfx_framegeneration_dx12.dll` callers; no crash; then whether the frame rate doubles.
+
+### 6.11 Refusing the FSR-FG swapchain leaves no picture; a plain swapchain instead (`f9933bc5`, `2b1001b7`)
+- **Reports (kilyan82, 2026-11-07, preview v0.9.88-pre1 with `0f566d5e`):** the game boots and plays audio, but only
+  the desktop and the game cursor are visible.
+- **First log, from the wrong process:**
+  - `CheckQuirks Game's Exe: CrashClientReporter.exe`. The game starts its crash reporter from the same folder; it
+    loads `winmm.dll`, so OptiScaler, `nvsmooth30.dll` and the Smooth Motion DRS write ran inside it;
+  - that instance truncated the game's `OptiScaler.log` at 12:17:29.83 and overwrote `nvsmooth30.log`; only the
+    game's `EvaluateFeature` lines were left interleaved;
+  - the default `ProcessExclusionList` had `crashreportclient.exe`, not `crashclientreporter.exe`.
+- **Second log, the game process (`[ProcessFilter] TargetProcessName=HTGame.exe`):**
+  - `ffxCreateContext_Dx12 type: CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_FOR_HWND_DX12` → `refused: NVSmooth30
+    Smooth Motion is active` (17:33:49.96);
+  - afterwards no `CreateSwapChain*` call at all, while DLSS evaluates 3,588 frames until 17:34:29. The game doesn't
+    fall back to a plain swapchain: Option A fails.
+- **Fixes:**
+  - `f9933bc5`: `crashclientreporter.exe` joins the default `ProcessExclusionList` (`Config.h`).
+  - `2b1001b7` (Option B of `nvsmooth30_plain_swapchain_plan.md`):
+    - `OptiScaler/inputs/FfxPlainSwapchain.h/.cpp` answers the request with a plain swapchain built from the game's own
+      desc through its hooked factory: `FOR_HWND` → `CreateSwapChainForHwnd(gameQueue, hwnd, desc, fullscreenDesc)`,
+      `NEW` → `CreateSwapChain(gameQueue, desc)`, `WRAP` keeps the game's swapchain. It returns an OptiScaler sentinel
+      context and logs `FSR-FG swapchain (...) replaced by a plain swapchain`. This mirrors the swapchain creation of
+      OptiScaler's own FSR-FG takeover (`ffxCreateContext_Dx12FG`), without needing OptiScaler's FG;
+    - while it's active, `ffxDestroyContext_Dx12` / `ffxConfigure_Dx12` / `ffxQuery_Dx12` / `ffxDispatch_Dx12` route
+      swapchain and FG calls to it, never to AMD's runtime. Configure and dispatch are no-ops; GPU memory queries
+      report 0; the interpolation command list / texture queries return none with an error. Each type is logged
+      once (`... answered by OptiScaler`);
+    - AMD's frame-generation context (`CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION`) is refused while a plain swapchain
+      is active: it needs AMD's swapchain;
+    - the V2 GPU-memory query struct (`ffxQueryFrameGenerationSwapChainGetGPUMemoryUsageDX12V2`) moves to
+      `OptiScaler/inputs/FG/FfxApi_Dx12_FG_Types.h`: its memory pointer comes after the device, sizes and formats, not
+      right after the header as in V1;
+    - the gate is `FfxSwapchainBlockPolicy::ShouldReplaceGameFsrFgSwapchain` (renamed from `ShouldRefuse...`). The
+      opt-out `[SmoothMotion] AllowGameFsrFgSwapchain` is unchanged.
+- **Test:** `tests/nvsmooth30_fsr_swapchain_block_unit.cpp` (6/6 PASS), `tests/process_exclusion_defaults_unit.cpp`
+  (3/3 PASS). The NVSmooth30 suites, `nr_ini_keys_unit` and `ampere_smooth_motion_unit` still pass. clang-format 23
+  clean; UTF-8 BOM present. The ffx struct layouts were checked against `ffx_api_dx12.h` / `ffx_framegeneration.h` at
+  the pinned FidelityFX-SDK submodule commit `c6efa6bf`.
+- **Expected in game (not yet checked):**
+  - `OptiScaler.log` (from `HTGame.exe`) shows `replaced by a plain swapchain` and a `WrappedIDXGISwapChain4` created;
+  - the game draws, with no crash;
+  - then: does the frame rate double, and does the menu report the swapchain bound?
