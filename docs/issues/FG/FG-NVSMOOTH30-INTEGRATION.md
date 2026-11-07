@@ -445,3 +445,27 @@ This guarantees that extended Windows interfaces (`IDXGISwapChainMedia`) and pro
   - `OptiScaler.log` (from `HTGame.exe`) shows `replaced by a plain swapchain` and a `WrappedIDXGISwapChain4` created;
   - the game draws, with no crash;
   - then: does the frame rate double, and does the menu report the swapchain bound?
+
+### 6.12 The plain swapchain was freed right after creation (`25c99fd1`)
+- **Report:** kilyan82, 2026-11-07, preview v0.9.88-pre2 (`8158f5d8`, with `2b1001b7`), `TargetProcessName=HTGame.exe`.
+  The game crashes again (Unreal crash reporter).
+- **What worked:**
+  - `FSR-FG swapchain (CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_FOR_HWND_DX12) replaced by a plain swapchain`;
+  - `WrappedIDXGISwapChain4 1 created` (18:01:25.68);
+  - NvPresent converted all 19 kernels (`sm89->86=1 rc=0`).
+- **The fault:**
+  - right after `Create` returned, the wrapper's count went `AddRef Count: 2` (caller `NvPresent64.dll`) → `Release
+    Count: 1` → `Release Count: 0` → `Real swapchain released, refCount: 0` (18:01:25.83);
+  - the crash is `EXCEPTION_ACCESS_VIOLATION writing address 0x15f0` at `ntdll.dll+0x1ceed`, from NvPresent's present
+    path (`NvPresent64.dll+0x4a6cc` → `+0x17585`, called from `HTGame.exe`): the game presented on the freed swapchain.
+- **Root cause:** AMD's provider (`ffx-api/src/dx12/ffx_provider_framegenerationswapchain_dx12.cpp` at the pinned
+  `c6efa6bf`) does `internal_context->fiSwapChain->AddRef(); // reference tracked by internal_context` for `WRAP`,
+  `NEW` and `FOR_HWND`, and `fiSwapChain->Release()` in `DestroyContext`. The game releases the extra reference it got
+  and relies on the context's. `FfxPlainSwapchain` took none.
+- **The fix (`25c99fd1`):** each plain context is its own record (`PlainContext { IUnknown* swapchain }`); the context
+  value is the record's address and `Owns` checks the live-record set. `Create` AddRefs the swapchain after every
+  successful path, and `Destroy` Releases it once for an owned record and frees the record.
+- **Test:** `tests/nvsmooth30_fsr_swapchain_block_unit.cpp` (7/7 PASS; test 7 is the reference). The other NVSmooth30
+  suites and `process_exclusion_defaults_unit` still pass. clang-format 23 clean; UTF-8 BOM present.
+- **Expected in game (not yet checked):** after `replaced by a plain swapchain`, no `Release Count: 0` for the wrapper;
+  the game draws with no crash; then whether the frame rate doubles.
