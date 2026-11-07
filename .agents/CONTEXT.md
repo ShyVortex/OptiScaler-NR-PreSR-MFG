@@ -160,4 +160,4 @@ Every implementation plan created for the project must document:
 ## Linux / Proton Notes
 - On Proton, D3D games present through DXVK / vkd3d-proton, so the Vulkan hooks and `MenuOverlayVk` also run for D3D games, on those layers' own threads. Window resizes reach the window before the Vulkan swapchains are recreated.
 - The Vulkan overlay renders at its stored swapchain image size and only on its own swapchain. `State::vulkanCreatingSC` is per thread. Rule §9 has the details and the `winedbg` method for Windows-side backtraces under Proton.
-- Open: quick F11 presses can still hang Metro 2033 Redux (`Dx11wDx12` bridge; `docs/issues/FG/FG-LINUX-VK-OVERLAY-RESIZE-FREEZE.md` section 4.2).
+- Quick F11 presses can still hang Metro 2033 Redux on Linux, but it reproduces without OptiScaler (Wine 11 `winevulkan`; `docs/issues/FG/FG-LINUX-VK-OVERLAY-RESIZE-FREEZE.md` section 4.2).
