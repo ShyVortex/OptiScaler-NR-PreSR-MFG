@@ -323,4 +323,15 @@ description: Architecture, frame generation, and safety rules for OptiScaler
        - `tests/fps_limit_dxvk_owner_unit.cpp` (Tests 1–3)
        - `tests/xell_game_context_limit_unit.cpp` (Tests 1–5)
 
-
+9. **Linux / Proton: Vulkan Menu Overlay and Swapchain Wrapping (verified in-game, Metro 2033 Redux on Linux, v0.9.87-pre5 / pre6)**:
+   - On Proton, D3D games present through DXVK / vkd3d-proton, so OptiScaler's Vulkan hooks (`Vulkan_Hooks.cpp`, `MenuOverlayVk`) also see D3D games' presents, from DXVK's / vkd3d-proton's own threads. A window resize (F11, alt-tab) reaches the window long before those layers recreate their Vulkan swapchains.
+   - **The Vulkan overlay stays inside its swapchain images (`OptiScaler/menu/menu_overlay_vk.cpp`, `OptiScaler/menu/MenuOverlayVkPolicy.h`)**:
+     - Render at the image size stored when the framebuffers were built: pass it to `MenuOverlayBase::RenderMenu(framebufferSize)` (the DX overlay's path) and use it as the render pass area. Never use `io.DisplaySize` (the window size, set every frame by `ImGui_ImplWin32_NewFrame`) for the render area: after F11 the menu drew past the image (NVIDIA Xid 13 "3D HEIGHT CT Violation", `VK_ERROR_DEVICE_LOST`, frozen game).
+     - Draw only on the swapchain the framebuffers belong to, with an image index below its image count (`MenuOverlayVkPolicy::ShouldDraw`). With the `Dx11wDx12` bridge there are swapchains on two devices (DXVK and vkd3d-proton).
+     - `CreateVulkanObjects` refuses more than `MaxImages` (8) images and grows the per-image arrays only when needed, zeroed; never allocate them again on every recreation.
+   - **`State::vulkanCreatingSC` is per thread (`static inline thread_local`, `OptiScaler/State.h`)**:
+     - `ScopedVulkanCreatingSC` sets it for the whole `vkQueuePresentKHR` / `vkCreateSwapchainKHR` hooks so that a DXGI swapchain created inside them, on the same thread, is not wrapped.
+     - Never make it process-wide again: DXVK's present thread held it while the game's thread created its swapchain, so after F11 the game's swapchain took the "Vulkan is creating swapchain!" path. It was never wrapped: no `Dx11wDx12` bridge, no XeFG, no borderless quirk, and fullscreen could not be left.
+   - Debugging a hang under Proton: `winedbg` of the game's own Proton build gives Windows-side backtraces (module + offset). `protontricks` may use a mismatched Wine and fail; `eu-stack` cannot unwind Windows modules. Use `WINEPREFIX=<compatdata>/pfx "<Proton>/files/bin/wine" winedbg --command "bt all" 0x<wpid>`.
+   - Open, not covered here: a few quick F11 presses can still hang Metro 2033 Redux on Linux (issue doc section 4.2).
+   - Documentation: `docs/issues/FG/FG-LINUX-VK-OVERLAY-RESIZE-FREEZE.md`. Associated tests: `tests/vk_overlay_resize_unit.cpp`, `tests/vulkan_creating_sc_thread_unit.cpp`.
