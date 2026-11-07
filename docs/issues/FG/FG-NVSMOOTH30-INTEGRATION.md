@@ -370,3 +370,36 @@ This guarantees that extended Windows interfaces (`IDXGISwapChainMedia`) and pro
   installed, running the deferred setup` and `Loading ... nvsmooth30.dll`; `nvsmooth30.log` shows `dummy D3D11
   swapchain creation failed: 0x887A0001`; no crash. Then: does the frame rate double, and does the menu report the
   swapchain as bound?
+
+### 6.10 NvPresent attaches, then crashes on the game's FSR-FG swapchain (`0f566d5e`)
+- **Report:** kilyan82, 2026-11-06, preview v0.9.87-pre1 (run 42185152692, with `b78a42a4`), same setup as 6.9. Still a
+  crash at start with `nvsmooth30.dll`; without it the game runs.
+- **The load-order fix works:** `waiting for OptiScaler's DXGI hooks` (17:26:15.6) → `running the deferred setup`
+  (17:26:18.6) → `Intercepted NVSmooth30 dummy swapchain probe`. `nvsmooth30.log`: `dummy D3D11 swapchain creation
+  failed: 0x887A0001`, `DXGI Present hooks failed`, 19 kernels with `sm89->86=1 rc=0`. The Steam overlay loop is gone.
+- **The new crash:** `EXCEPTION_ACCESS_VIOLATION reading address 0x18` at `D3D12Core.dll+0x1150f`. The crashing
+  thread, read upward from RSP in `UEMinidump.dmp`: `nvwgf2umx` / `D3D12Core` ← `NvPresent64.dll` (`+0x47f60`,
+  `+0x4a1c0`, `+0x32cc8`, … `+0x4a64f`) ← `amd_fidelityfx_framegeneration_dx12.dll+0x984d`, the start of FSR FG's
+  presenter thread. NvPresent attached, and fails on presents coming from FSR's presenter thread; the exact fault is
+  unknown (no symbols).
+- **The FSR-FG swapchain exists with FSR FG off:** `ffxCreateContext_Dx12 type:
+  CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_FOR_HWND_DX12` at 17:26:27.72, result 0. The reporter's
+  `GameUserSettings.ini` has `bFSRFrameGeneration=False`, `bUseFSR=False`, `bUseDLSS=True`. With `FGOutput=NoFG`,
+  `ffxCreateContext_Dx12` passed the desc to AMD's runtime. The exclusion in `NVSmooth30Loader::TrySetup` (4.2) covers
+  OptiScaler's and the external unlockers' frame generation, not a game's FSR-FG swapchain.
+- **The fix (`0f566d5e`, Option A of `nvsmooth30_fsr_swapchain_plan.md`):**
+  - `OptiScaler/inputs/FfxSwapchainBlockPolicy.h`: refuse a `FRAMEGENERATIONSWAPCHAIN` `FOR_HWND` / `NEW` / `WRAP` desc
+    when `nvsmooth30.dll` is loaded, the user hasn't opted out, and OptiScaler isn't taking the swapchain over itself;
+  - `ffxCreateContext_Dx12` applies it after OptiScaler's own FSR-FG takeover branch, logs `FSR-FG swapchain (...)
+    refused: NVSmooth30 Smooth Motion is active` and returns `FFX_API_RETURN_ERROR_RUNTIME_ERROR` without calling AMD's
+    runtime;
+  - opt-out `[SmoothMotion] AllowGameFsrFgSwapchain` (default false) and the menu checkbox "Let the game use its FSR FG
+    swapchain (restart)". `OptiScaler.ini` now documents the `[SmoothMotion]` section (`EnableNVSmooth30`,
+    `AllowGameFsrFgSwapchain`).
+  - Precedent: rule §4 refuses a game's XeSS-FG swapchain context under the external RTX 20/30 unlocker.
+- **Risk:** whether the game falls back cleanly to a plain swapchain when the context fails is unknown until tested.
+  If it doesn't, Option B (OptiScaler creates a plain swapchain and answers the FSR context calls itself) is next.
+- **Test:** `tests/nvsmooth30_fsr_swapchain_block_unit.cpp` (5/5 PASS). The NVSmooth30 suites, `nr_ini_keys_unit` and
+  `dlssg_sm86_v030_ini_unit` still pass. clang-format 23 clean; UTF-8 BOM present.
+- **Expected in game (not yet checked):** the refusal line in `OptiScaler.log`; a `WrappedIDXGISwapChain4` created
+  without `amd_fidelityfx_framegeneration_dx12.dll` callers; no crash; then whether the frame rate doubles.
