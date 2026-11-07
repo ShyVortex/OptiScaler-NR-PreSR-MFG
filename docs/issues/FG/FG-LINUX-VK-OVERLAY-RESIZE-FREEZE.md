@@ -11,10 +11,9 @@
     the D3D11 game is on DXVK and XeFG on vkd3d-proton.
   - OptiScaler v0.9.87-pre4 (`6961c56`), LogLevel 0, `OverlayMenu=auto`.
   - `[XeMFG] UnlockMFG=true`, `Source=OptiScaler`, 4X.
-- **Status**: two defects fixed on `fix/linux-vk-overlay-resize-freeze` (section 5) and confirmed in game (section 6).
-  - A third cause still makes F11 hang the game after a few switches (4.2); it is open, to be handled separately.
-  - The overlay fix is verified in game: no more GPU fault on F11.
-  - The per-thread flag (4.1) still needs a retest.
+- **Status**: two OptiScaler defects fixed (section 5, merged in PR 36) and confirmed in game (section 6).
+  - The F11 hang that remains (4.2) is **not caused by OptiScaler**: it reproduces in vanilla Metro 2033 Redux without
+    OptiScaler. It sits in Wine 11's `winevulkan` / the platform, and is not pursued here.
 
 ## 2. Reported Symptoms
 
@@ -107,7 +106,7 @@ Cause: `State::vulkanCreatingSC` was a process-wide flag.
 - The flag dates from `03126e4c`; it was not introduced by the overlay fix.
 - The 44 s hang is attributed to the same cause, but without thread stacks this is not proven.
 
-### 4.2 Remaining hang after several F11 switches (open)
+### 4.2 Remaining hang after several F11 switches (not OptiScaler)
 
 With both fixes (v0.9.87-pre6) the game's swapchain is wrapped again after F11. After a few quick F11 presses it still
 hangs, also with `OverlayMenu=false`, so the Vulkan overlay is not involved. No NVIDIA Xid is logged.
@@ -131,14 +130,51 @@ WINEPREFIX=~/.local/share/Steam/steamapps/compatdata/286690/pfx \
 | XeFG present (0378) | `libxess_fg+0x21c496` → `+0x2202ed` (paced present call) → `dxgi+0x14f70d` (pacing detour) → `libxess_fg+0x21f965` (native present) → `dxgi` (+0x24e000, +0x24b811, +0x8775e) → `d3d12core+0x4bb9cf` | vkd3d-proton `Present` |
 | vkd3d-proton present worker (0370) | `d3d12core+0x475adb` → … → `d3d12core+0x4c07c8` → `winevulkan+0x1cd1e` | inside a Vulkan call |
 
-Suspected cause, not proven:
+First suspect (not the cause, see "Result" below):
 - `Dx11wDx12SC::Present` (upstream `3fc6c8c3`) presents two swapchains to the same window every frame: the game's hidden
   D3D11 swapchain (`_real->Present(0, ...)`, on DXVK) and XeFG's D3D12 swapchain (on vkd3d-proton). The log shows both
   Vulkan swapchains presenting in alternation.
 - On Windows DXGI copes with that. On Linux they are two Vulkan swapchains on one native window, which Vulkan does not
   allow.
 - After F11 both go out of date, and vkd3d-proton's present does not return.
-- Changing this needs its own investigation: the hidden present may keep the D3D11 back-buffer index advancing.
+
+What the hidden D3D11 swapchain is still used for (`OptiScaler/with_dx12/dx11_with_dx12_sc.cpp`):
+- While XeFG's swapchain exists, the bridge sends everything the game can wait on or read back to XeFG's swapchain:
+  - `GetFrameLatencyWaitableObject`, `SetMaximumFrameLatency` / `GetMaximumFrameLatency`;
+  - `GetFrameStatistics`, `GetLastPresentCount`;
+  - `SetFullscreenState` / `GetFullscreenState`, `GetFullscreenDesc`, `ResizeTarget`, `GetContainingOutput`.
+- Only `GetBuffer` and `GetCurrentBackBufferIndex` use the D3D11 swapchain. Every present, the bridge copies the buffer
+  at the reported index into XeFG's swapchain (`_GetDx11BackBufferIndexForPresent`, `_CopyDx11BackBufferToShared`).
+  - If that index stopped advancing, the bridge would still copy the image the game just rendered.
+  - In Metro 2033 Redux it is always 0 anyway (`dx11Index 0, real3Index 0` in every pre6 frame).
+- So under DXVK the hidden present does nothing the game depends on. It does put a second Vulkan swapchain on the
+  window.
+- No earlier attempt: no other issue document mentions the hidden present, and `git log` shows only the commit that
+  added it (`3fc6c8c3`).
+
+Result (2026-11-07):
+- Skipping the hidden present under DXVK (`3077cf0b`, v0.9.87-pre7) changed the shape of the hang but did not remove
+  it. The game's main thread then waited in Metro's own job system (`WaitForMultipleObjects` at `metro+0x9382cc`), with
+  no thread inside a present.
+- The same hang then reproduced:
+  - with frame generation and the overlay menu off (OptiScaler doing only DLSS upscaling);
+  - in vanilla Metro without OptiScaler (`dxgi.dll` renamed);
+  - with MangoHud off, with the Steam overlay off;
+  - on Proton-CachyOS (Wine 11.0) and GE-Proton11-11;
+  - with `PROTON_NO_FSYNC=1`.
+- Every vanilla run's Proton log shows the same sequence:
+
+  ```
+  info:  Presenter: Got VK_SUBOPTIMAL_KHR, recreating swapchain
+  err:winevulkan:signaller_worker wait timed out with non-empty poll list.
+  err:   DxvkSubmissionQueue: Timeout occured, GPU likely hung.
+  err:   DxvkSubmissionQueue: Command submission failed: VK_ERROR_DEVICE_LOST
+  ```
+
+  No NVIDIA Xid is logged, so a completion signal in Wine's `winevulkan` is lost rather than the GPU faulting.
+- The pre6 backtrace also ended in `winevulkan`, so it was most likely this same hang, not the double present.
+- The skip was reverted. Untested, not pursued: a Wine 10-based Proton, NVIDIA-only (MUX / X11). The machine is a
+  hybrid Intel Iris Xe + RTX 3080 Ti laptop on KDE Wayland (XWayland), with PRIME offload.
 
 ## 5. Planned Solution
 
@@ -156,6 +192,8 @@ On `fix/linux-vk-overlay-resize-freeze`:
 - 4.1: `State::vulkanCreatingSC` is `static inline thread_local`. Same-thread nesting keeps working; the game's thread no
   longer sees a present thread's flag. Test: `tests/vulkan_creating_sc_thread_unit.cpp`.
 - Unchanged: when the overlay is created and destroyed, the DX overlay, and the `OverlayMenu` defaults.
+- 4.2: no OptiScaler change. A skip of the bridge's hidden D3D11 present under DXVK was tried (`3077cf0b`) and reverted,
+  because the hang reproduces without OptiScaler.
 
 Related history:
 - `5181a07a`: a different alt-tab deadlock (DLSS-G `_localMutex`).
@@ -175,5 +213,5 @@ v0.9.87-pre6 (both fixes), same setup:
 - After F11 the game's swapchain is wrapped again: `Dx11wDx12SC 2 created`, a new XeFG context and swapchain, no
   `Vulkan is creating swapchain!`.
 - No Xid.
-- After a few quick F11 presses the game still hangs, with and without the overlay menu. That is 4.2, which remains
-  open.
+- After a few quick F11 presses the game still hangs, with and without the overlay menu. That is 4.2, which reproduces
+  without OptiScaler (vanilla Metro, any Wine 11 Proton tried).
