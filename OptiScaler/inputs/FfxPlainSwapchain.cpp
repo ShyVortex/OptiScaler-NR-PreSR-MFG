@@ -15,13 +15,20 @@ namespace FfxPlainSwapchain
 {
 namespace
 {
-// Distinct addresses used as contexts; they're never dereferenced.
-char s_contextTag;
+// One record per plain context; the context value is the record's address. Like AMD's provider
+// (ffx_provider_framegenerationswapchain_dx12.cpp: "reference tracked by internal_context"), the record holds its own
+// reference to the swapchain until Destroy: the game releases the extra reference it got, and without this one the
+// swapchain was freed right after creation (DLSS Unlocked #42, FG-NVSMOOTH30-INTEGRATION.md 6.12).
+struct PlainContext
+{
+    IUnknown* swapchain = nullptr;
+};
+
+std::mutex s_contextsMutex;
+std::set<PlainContext*> s_contexts;
 std::atomic<int> s_live { 0 };
 std::mutex s_logMutex;
 std::set<uint64_t> s_loggedTypes;
-
-ffxContext Sentinel() { return reinterpret_cast<ffxContext>(&s_contextTag); }
 
 void LogOnce(const char* what, uint64_t type)
 {
@@ -31,7 +38,14 @@ void LogOnce(const char* what, uint64_t type)
 }
 } // namespace
 
-bool Owns(ffxContext context) { return context != nullptr && context == Sentinel(); }
+bool Owns(ffxContext context)
+{
+    if (context == nullptr)
+        return false;
+
+    std::lock_guard lock(s_contextsMutex);
+    return s_contexts.contains(reinterpret_cast<PlainContext*>(context));
+}
 
 bool Active() { return s_live.load() > 0; }
 
@@ -41,6 +55,7 @@ ffxReturnCode_t Create(ffxContext* context, ffxCreateContextDescHeader* desc)
         return FFX_API_RETURN_ERROR_PARAMETER;
 
     HRESULT result = E_INVALIDARG;
+    IUnknown** created = nullptr;
 
     if (desc->type == FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_FOR_HWND_DX12)
     {
@@ -56,6 +71,7 @@ ffxReturnCode_t Create(ffxContext* context, ffxCreateContextDescHeader* desc)
         result = factory->CreateSwapChainForHwnd(cDesc->gameQueue, cDesc->hwnd, cDesc->desc, cDesc->fullscreenDesc,
                                                  nullptr, (IDXGISwapChain1**) cDesc->swapchain);
         factory->Release();
+        created = (IUnknown**) cDesc->swapchain;
     }
     else if (desc->type == FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_NEW_DX12)
     {
@@ -65,21 +81,31 @@ ffxReturnCode_t Create(ffxContext* context, ffxCreateContextDescHeader* desc)
 
         result =
             cDesc->dxgiFactory->CreateSwapChain(cDesc->gameQueue, cDesc->desc, (IDXGISwapChain**) cDesc->swapchain);
+        created = (IUnknown**) cDesc->swapchain;
     }
     else if (desc->type == FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_WRAP_DX12)
     {
         // The game's own swapchain stays as it is: nothing to wrap it in.
         auto cDesc = (ffxCreateContextDescFrameGenerationSwapChainWrapDX12*) desc;
         result = (cDesc->swapchain != nullptr && *cDesc->swapchain != nullptr) ? S_OK : E_INVALIDARG;
+        created = (IUnknown**) cDesc->swapchain;
     }
 
-    if (result != S_OK)
+    if (result != S_OK || created == nullptr || *created == nullptr)
     {
         LOG_ERROR("FFX plain swapchain: creating {} failed: {:X}", FfxApiProxy::GetTypeName(desc->type), (UINT) result);
         return FFX_API_RETURN_ERROR_RUNTIME_ERROR;
     }
 
-    *context = Sentinel();
+    auto record = new PlainContext { *created };
+    record->swapchain->AddRef(); // reference tracked by the context, released in Destroy
+
+    {
+        std::lock_guard lock(s_contextsMutex);
+        s_contexts.insert(record);
+    }
+
+    *context = reinterpret_cast<ffxContext>(record);
     s_live++;
     LOG_WARN("FSR-FG swapchain ({}) replaced by a plain swapchain: NVSmooth30 Smooth Motion is active",
              FfxApiProxy::GetTypeName(desc->type));
@@ -88,14 +114,25 @@ ffxReturnCode_t Create(ffxContext* context, ffxCreateContextDescHeader* desc)
 
 ffxReturnCode_t Destroy(ffxContext* context)
 {
-    // The swapchain belongs to the game, which releases it; only the context goes away.
-    if (context != nullptr && Owns(*context))
+    if (context == nullptr || *context == nullptr)
+        return FFX_API_RETURN_OK;
+
+    auto record = reinterpret_cast<PlainContext*>(*context);
     {
-        if (s_live.load() > 0)
-            s_live--;
-        *context = nullptr;
-        LOG_INFO("FFX plain swapchain: context destroyed");
+        std::lock_guard lock(s_contextsMutex);
+        if (s_contexts.erase(record) == 0)
+            return FFX_API_RETURN_OK;
     }
+
+    // Drop the context's own reference; the game keeps or releases its own.
+    if (record->swapchain != nullptr)
+        record->swapchain->Release();
+    delete record;
+
+    if (s_live.load() > 0)
+        s_live--;
+    *context = nullptr;
+    LOG_INFO("FFX plain swapchain: context destroyed");
 
     return FFX_API_RETURN_OK;
 }

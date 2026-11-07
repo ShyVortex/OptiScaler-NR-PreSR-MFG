@@ -22,6 +22,9 @@
 // 5. FfxPlainSwapchain creates the swapchain from the game's own request through the factory and never calls AMD's
 //    runtime; the V2 memory query uses its own struct.
 // 6. Config, INI load/save, the shipped OptiScaler.ini and the menu carry the opt-out.
+// 7. Each plain context is its own record holding a swapchain reference, like AMD's provider ("reference tracked by
+//    internal_context"): Create AddRefs after every successful path, Destroy Releases once and only for an owned
+//    record. Without it the game's Release freed the swapchain right after creation (6.12).
 
 static std::string ReadFile(const char* path)
 {
@@ -164,6 +167,31 @@ int main()
     }
     std::puts("Test 6 PASS: the opt-out in config, INI and menu");
 
-    std::puts("All 6 NVSmooth30 FSR-FG swapchain tests passed.");
+    // Test 7
+    {
+        const auto plain = Squash(ReadFile("OptiScaler/inputs/FfxPlainSwapchain.cpp"));
+        assert(plain.find("Sentinel") == std::string::npos && plain.find("s_contextTag") == std::string::npos);
+        assert(plain.find("structPlainContext{IUnknown*swapchain=nullptr;};") != std::string::npos);
+        const auto create = Function(plain, "ffxReturnCode_tCreate(");
+        for (const char* path : { "nullptr,(IDXGISwapChain1**)cDesc->swapchain);factory->Release();created=(IUnknown**)"
+                                  "cDesc->swapchain;",
+                                  "(IDXGISwapChain**)cDesc->swapchain);created=(IUnknown**)cDesc->swapchain;",
+                                  "?S_OK:E_INVALIDARG;created=(IUnknown**)cDesc->swapchain;" })
+            assert(create.find(path) != std::string::npos);
+        const auto guard = At(create, "if(result!=S_OK||created==nullptr||*created==nullptr)");
+        const auto addref = At(create, "autorecord=newPlainContext{*created};record->swapchain->AddRef();");
+        const auto ok = At(create, "*context=reinterpret_cast<ffxContext>(record);");
+        assert(guard < addref && addref < ok);
+        const auto destroy = Function(plain, "ffxReturnCode_tDestroy(");
+        const auto erase = At(destroy, "if(s_contexts.erase(record)==0)returnFFX_API_RETURN_OK;");
+        const auto release = At(destroy, "if(record->swapchain!=nullptr)record->swapchain->Release();deleterecord;");
+        assert(erase < release);
+        assert(destroy.find("->Release()") == destroy.rfind("->Release()"));
+        const auto owns = plain.substr(At(plain, "boolOwns(ffxContextcontext){"), 200);
+        assert(owns.find("returns_contexts.contains(reinterpret_cast<PlainContext*>(context));") != std::string::npos);
+    }
+    std::puts("Test 7 PASS: each plain context holds a swapchain reference until Destroy");
+
+    std::puts("All 7 NVSmooth30 FSR-FG swapchain tests passed.");
     return 0;
 }
