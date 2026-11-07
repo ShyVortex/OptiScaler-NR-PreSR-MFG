@@ -4241,9 +4241,10 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             if (ImGui::Checkbox("Let the game use its FSR FG swapchain (restart)##nv_smooth30_fsr", &allowFsrSc))
                 config->SmoothMotionAllowGameFsrFgSwapchain = allowFsrSc;
             ShowHelpMarker(
-                "Off (default): while NVSmooth30 is loaded, the game's AMD FSR Frame Generation swapchain is\n"
-                "refused, so the game presents through a normal swapchain. NVIDIA Smooth Motion crashed on\n"
-                "the FSR swapchain's presenter thread (e.g. Neverness to Everness, even with FSR FG off).\n"
+                "Off (default): while NVSmooth30 is loaded, OptiScaler gives the game a normal swapchain in\n"
+                "place of AMD's FSR Frame Generation swapchain (FSR FG can't run then). NVIDIA Smooth Motion\n"
+                "crashed on the FSR swapchain's presenter thread (e.g. Neverness to Everness, even with\n"
+                "FSR FG off).\n"
                 "On: leave the game's FSR FG swapchain alone.");
 
             ImGui::Text("NVSmooth30 Status:");

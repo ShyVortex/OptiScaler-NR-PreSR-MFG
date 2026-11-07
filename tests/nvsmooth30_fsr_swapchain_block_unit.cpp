@@ -7,19 +7,21 @@
 #include <sstream>
 #include <string>
 
-// DLSS Unlocked #42 (kilyan82, v0.9.87-pre1, Neverness to Everness): with the load-order fix NVSmooth30's Present hooks
-// were blocked and NvPresent attached, but the game crashed in D3D12Core on AMD FSR-FG's presenter thread
-// (amd_fidelityfx_framegeneration_dx12.dll → NvPresent64.dll → D3D12Core.dll). The game creates its FSR-FG swapchain
-// even with bFSRFrameGeneration=False (FG-NVSMOOTH30-INTEGRATION.md 6.10).
+// DLSS Unlocked #42 (kilyan82, Neverness to Everness): NvPresent crashed in D3D12Core on AMD FSR-FG's presenter thread.
+// The game creates its FSR-FG swapchain even with bFSRFrameGeneration=False. Refusing the request (0f566d5e) left the
+// game with no swapchain at all (audio, no picture), so OptiScaler now answers it with a plain swapchain and handles
+// the game's later calls on that context itself (FG-NVSMOOTH30-INTEGRATION.md 6.11).
 //
 // Validates:
-// 1. The gate refuses only a swapchain-creation desc, with NVSmooth30 loaded, no user opt-out, and no OptiScaler
-//    takeover.
-// 2. ffxCreateContext_Dx12 keeps OptiScaler's own FSR-FG takeover branch first, then applies the gate before calling
-//    AMD's runtime, and the refusal returns without calling it.
-// 3. The gate covers FOR_HWND, NEW and WRAP and reads the loader status and the opt-out.
-// 4. Config, INI load/save and the shipped OptiScaler.ini carry [SmoothMotion] AllowGameFsrFgSwapchain (default false).
-// 5. The menu offers the opt-out in the NVSmooth30 subsection.
+// 1. The replace gate: swapchain-creation desc, NVSmooth30 loaded, no opt-out, no OptiScaler takeover.
+// 2. Descriptor ids and DecideQuery / ShouldRefuseFrameGenerationContext answers.
+// 3. ffxCreateContext_Dx12 keeps OptiScaler's own FSR-FG takeover first, then hands the request to
+//    FfxPlainSwapchain::Create before AMD's runtime, and refuses AMD's FG context while a plain swapchain is active.
+// 4. Destroy / Configure / Query / Dispatch hand plain-swapchain calls to FfxPlainSwapchain before any FfxApiProxy
+//    call.
+// 5. FfxPlainSwapchain creates the swapchain from the game's own request through the factory and never calls AMD's
+//    runtime; the V2 memory query uses its own struct.
+// 6. Config, INI load/save, the shipped OptiScaler.ini and the menu carry the opt-out.
 
 static std::string ReadFile(const char* path)
 {
@@ -54,46 +56,95 @@ static size_t At(const std::string& text, const std::string& needle)
     return at;
 }
 
+static std::string Function(const std::string& squashed, const std::string& signature)
+{
+    const auto start = At(squashed, signature);
+    const auto next = squashed.find("ffxReturnCode_tffx", start + signature.size());
+    return squashed.substr(start, next == std::string::npos ? std::string::npos : next - start);
+}
+
 int main()
 {
-    using FfxSwapchainBlockPolicy::ShouldRefuseGameFsrFgSwapchain;
+    using namespace FfxSwapchainBlockPolicy;
 
     // Test 1
-    static_assert(ShouldRefuseGameFsrFgSwapchain(true, true, false, false));
-    static_assert(!ShouldRefuseGameFsrFgSwapchain(false, true, false, false));
-    static_assert(!ShouldRefuseGameFsrFgSwapchain(true, false, false, false));
-    static_assert(!ShouldRefuseGameFsrFgSwapchain(true, true, true, false));
-    static_assert(!ShouldRefuseGameFsrFgSwapchain(true, true, false, true));
-    std::puts("Test 1 PASS: refuse only a game's FSR-FG swapchain while NVSmooth30 is loaded");
-
-    const auto ffx = Squash(ReadFile("OptiScaler/inputs/FfxApi_Dx12.cpp"));
-    const auto fn = ffx.substr(At(ffx, "ffxReturnCode_tffxCreateContext_Dx12(ffxContext*context"));
+    static_assert(ShouldReplaceGameFsrFgSwapchain(true, true, false, false));
+    static_assert(!ShouldReplaceGameFsrFgSwapchain(false, true, false, false));
+    static_assert(!ShouldReplaceGameFsrFgSwapchain(true, false, false, false));
+    static_assert(!ShouldReplaceGameFsrFgSwapchain(true, true, true, false));
+    static_assert(!ShouldReplaceGameFsrFgSwapchain(true, true, false, true));
+    std::puts("Test 1 PASS: replace only a game's FSR-FG swapchain while NVSmooth30 is loaded");
 
     // Test 2
-    {
-        const auto takeover = At(fn, "if(optiScalerTakesOver){autoresult=ffxCreateContext_Dx12FG(context,desc,memCb);");
-        const auto gate = At(fn, "if(FfxSwapchainBlockPolicy::ShouldRefuseGameFsrFgSwapchain(");
-        const auto original = At(fn, "autoffxApiResult=FfxApiProxy::D3D12_CreateContext(context,desc,memCb);");
-        assert(takeover < gate && gate < original);
-        const auto refuse = fn.substr(gate, At(fn.substr(gate), "returnFFX_API_RETURN_ERROR_RUNTIME_ERROR;}"));
-        assert(refuse.find("D3D12_CreateContext") == std::string::npos);
-    }
-    std::puts("Test 2 PASS: the takeover stays first; the refusal never reaches AMD's runtime");
+    static_assert(IsSwapchainCreation(0x30001u) && IsSwapchainCreation(0x30005u) && IsSwapchainCreation(0x30006u));
+    static_assert(!IsSwapchainCreation(0x20001u) && !IsSwapchainCreation(0x30002u));
+    static_assert(ShouldRefuseFrameGenerationContext(0x20001u, true));
+    static_assert(!ShouldRefuseFrameGenerationContext(0x20001u, false));
+    static_assert(!ShouldRefuseFrameGenerationContext(0x30006u, true));
+    static_assert(DecideQuery(0x30009u) == QueryAnswer::ZeroMemory);
+    static_assert(DecideQuery(0x3000Au) == QueryAnswer::ZeroMemory);
+    static_assert(DecideQuery(0x20007u) == QueryAnswer::ZeroMemory);
+    static_assert(DecideQuery(0x30003u) == QueryAnswer::NullCommandList);
+    static_assert(DecideQuery(0x30004u) == QueryAnswer::NullTexture);
+    static_assert(DecideQuery(0x12345u) == QueryAnswer::Unsupported);
+    std::puts("Test 2 PASS: descriptor ids, query answers and the FG-context refusal");
+
+    const auto ffx = Squash(ReadFile("OptiScaler/inputs/FfxApi_Dx12.cpp"));
 
     // Test 3
     {
-        assert(fn.find("constboolanySwapchainType=swapchainCreationType||desc->type==FFX_API_CREATE_CONTEXT_DESC_TYPE_"
-                       "FRAMEGENERATIONSWAPCHAIN_WRAP_DX12;") != std::string::npos);
-        assert(fn.find("FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_NEW_DX12||desc->type==FFX_API_CREATE_"
-                       "CONTEXT_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_FOR_HWND_DX12") != std::string::npos);
-        assert(
-            fn.find("ShouldRefuseGameFsrFgSwapchain(anySwapchainType,NVSmooth30Loader::LastStatus().DllLoaded,Config::"
-                    "Instance()->SmoothMotionAllowGameFsrFgSwapchain.value_or_default(),optiScalerTakesOver)") !=
-            std::string::npos);
+        const auto fn = Function(ffx, "ffxReturnCode_tffxCreateContext_Dx12(ffxContext*context");
+        const auto takeover = At(fn, "if(optiScalerTakesOver){autoresult=ffxCreateContext_Dx12FG(context,desc,memCb);");
+        const auto replace =
+            At(fn, "if(FfxSwapchainBlockPolicy::ShouldReplaceGameFsrFgSwapchain(FfxSwapchainBlockPolicy::"
+                   "IsSwapchainCreation(desc->type),NVSmooth30Loader::LastStatus().DllLoaded,Config::"
+                   "Instance()->SmoothMotionAllowGameFsrFgSwapchain.value_or_default(),"
+                   "optiScalerTakesOver)){returnFfxPlainSwapchain::Create(context,desc);}");
+        const auto refuseFg = At(fn, "if(FfxSwapchainBlockPolicy::ShouldRefuseFrameGenerationContext(desc->type,"
+                                     "FfxPlainSwapchain::Active())){");
+        const auto original = At(fn, "autoffxApiResult=FfxApiProxy::D3D12_CreateContext(context,desc,memCb);");
+        assert(takeover < replace && replace < refuseFg && refuseFg < original);
+        assert(fn.find("refused:NVSmooth30SmoothMotionisactive") == std::string::npos);
     }
-    std::puts("Test 3 PASS: FOR_HWND, NEW and WRAP are covered; loader status and opt-out are read");
+    std::puts("Test 3 PASS: the takeover stays first; the plain swapchain answers before AMD's runtime");
 
     // Test 4
+    {
+        const auto destroy = Function(ffx, "ffxReturnCode_tffxDestroyContext_Dx12(");
+        assert(At(destroy, "if(FfxPlainSwapchain::Owns(*context))returnFfxPlainSwapchain::Destroy(context);") <
+               At(destroy, "FfxApiProxy::D3D12_DestroyContext("));
+        for (const auto& [sig, call] : { std::pair { "ffxReturnCode_tffxConfigure_Dx12(", "Configure" },
+                                         std::pair { "ffxReturnCode_tffxQuery_Dx12(", "Query" },
+                                         std::pair { "ffxReturnCode_tffxDispatch_Dx12(", "Dispatch" } })
+        {
+            const auto fn = Function(ffx, sig);
+            const auto route = At(fn, std::string("if((context!=nullptr&&FfxPlainSwapchain::Owns(*context))||"
+                                                  "FfxPlainSwapchain::Active())returnFfxPlainSwapchain::") +
+                                          call + "(desc);");
+            assert(route < At(fn, "FfxApiProxy::D3D12_"));
+        }
+    }
+    std::puts("Test 4 PASS: plain-swapchain calls never reach AMD's runtime");
+
+    // Test 5
+    {
+        const auto plain = Squash(ReadFile("OptiScaler/inputs/FfxPlainSwapchain.cpp"));
+        assert(plain.find("factory->CreateSwapChainForHwnd(cDesc->gameQueue,cDesc->hwnd,cDesc->desc,cDesc->"
+                          "fullscreenDesc,nullptr,(IDXGISwapChain1**)cDesc->swapchain);") != std::string::npos);
+        assert(plain.find("cDesc->dxgiFactory->CreateSwapChain(cDesc->gameQueue,cDesc->desc,(IDXGISwapChain**)cDesc->"
+                          "swapchain);") != std::string::npos);
+        assert(plain.find("FfxApiProxy::D3D12_") == std::string::npos);
+        assert(plain.find("(ffxQueryFrameGenerationSwapChainGetGPUMemoryUsageDX12V2*)desc") != std::string::npos);
+        assert(plain.find("replacedbyaplainswapchain") != std::string::npos);
+        const auto types = ReadFile("OptiScaler/inputs/FG/FfxApi_Dx12_FG_Types.h");
+        assert(types.find("struct ffxQueryFrameGenerationSwapChainGetGPUMemoryUsageDX12V2") != std::string::npos);
+        const auto fg = ReadFile("OptiScaler/inputs/FG/FfxApi_Dx12_FG.cpp");
+        assert(fg.find("#include \"FfxApi_Dx12_FG_Types.h\"") != std::string::npos);
+        assert(fg.find("struct ffxQueryFrameGenerationSwapChainGetGPUMemoryUsageDX12V2\n") == std::string::npos);
+    }
+    std::puts("Test 5 PASS: the plain swapchain comes from the game's request through the factory");
+
+    // Test 6
     {
         const auto h = Squash(ReadFile("OptiScaler/Config.h"));
         assert(h.find("CustomOptional<bool>SmoothMotionAllowGameFsrFgSwapchain{false};") != std::string::npos);
@@ -106,19 +157,13 @@ int main()
         const auto section = At(ini, "[SmoothMotion]");
         assert(At(ini, "AllowGameFsrFgSwapchain=auto") > section);
         assert(ini.find("\n[", section + 1) == std::string::npos); // last section: its keys can't fall into another
-    }
-    std::puts("Test 4 PASS: [SmoothMotion] AllowGameFsrFgSwapchain in config, load/save and the shipped INI");
-
-    // Test 5
-    {
         const auto menu = Squash(ReadFile("OptiScaler/menu/menu_common.cpp"));
-        const auto nvs = At(menu, "\"EnableNVSmooth30Unlocker(RTX30)##nv_smooth30\"");
-        const auto box = At(menu, "\"LetthegameuseitsFSRFGswapchain(restart)##nv_smooth30_fsr\"");
-        assert(nvs < box);
+        assert(At(menu, "\"EnableNVSmooth30Unlocker(RTX30)##nv_smooth30\"") <
+               At(menu, "\"LetthegameuseitsFSRFGswapchain(restart)##nv_smooth30_fsr\""));
         assert(menu.find("config->SmoothMotionAllowGameFsrFgSwapchain=allowFsrSc;") != std::string::npos);
     }
-    std::puts("Test 5 PASS: the menu offers the opt-out");
+    std::puts("Test 6 PASS: the opt-out in config, INI and menu");
 
-    std::puts("All 5 NVSmooth30 FSR-FG swapchain tests passed.");
+    std::puts("All 6 NVSmooth30 FSR-FG swapchain tests passed.");
     return 0;
 }

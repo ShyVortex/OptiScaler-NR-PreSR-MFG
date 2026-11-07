@@ -10,6 +10,7 @@
 
 #include "FG/FfxApi_Dx12_FG.h"
 #include "FfxSwapchainBlockPolicy.h"
+#include "FfxPlainSwapchain.h"
 #include <framegen/smoothmotion/NVSmooth30Loader.h>
 
 #include "ffx_upscale.h"
@@ -227,15 +228,18 @@ ffxReturnCode_t ffxCreateContext_Dx12(ffxContext* context, ffxCreateContextDescH
         return result;
     }
 
-    // NVSmooth30 Smooth Motion crashes on FSR-FG's presenter thread: keep the game on a plain swapchain
-    const bool anySwapchainType =
-        swapchainCreationType || desc->type == FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_WRAP_DX12;
-    if (FfxSwapchainBlockPolicy::ShouldRefuseGameFsrFgSwapchain(
-            anySwapchainType, NVSmooth30Loader::LastStatus().DllLoaded,
+    // NVSmooth30 Smooth Motion crashed on FSR-FG's presenter thread, and a refused request left the game with no
+    // swapchain: answer it with a plain swapchain instead (FfxPlainSwapchain, FG-NVSMOOTH30-INTEGRATION.md 6.11)
+    if (FfxSwapchainBlockPolicy::ShouldReplaceGameFsrFgSwapchain(
+            FfxSwapchainBlockPolicy::IsSwapchainCreation(desc->type), NVSmooth30Loader::LastStatus().DllLoaded,
             Config::Instance()->SmoothMotionAllowGameFsrFgSwapchain.value_or_default(), optiScalerTakesOver))
     {
-        LOG_WARN("FSR-FG swapchain ({}) refused: NVSmooth30 Smooth Motion is active",
-                 FfxApiProxy::GetTypeName(desc->type));
+        return FfxPlainSwapchain::Create(context, desc);
+    }
+
+    if (FfxSwapchainBlockPolicy::ShouldRefuseFrameGenerationContext(desc->type, FfxPlainSwapchain::Active()))
+    {
+        LOG_WARN("FSR-FG context refused: a plain swapchain stands in for AMD's while NVSmooth30 is active");
         return FFX_API_RETURN_ERROR_RUNTIME_ERROR;
     }
 
@@ -320,6 +324,9 @@ ffxReturnCode_t ffxDestroyContext_Dx12(ffxContext* context, const ffxAllocationC
 
     LOG_DEBUG("context: {:X}", (size_t) *context);
 
+    if (FfxPlainSwapchain::Owns(*context))
+        return FfxPlainSwapchain::Destroy(context);
+
     if (*context == (void*) scContext || *context == (void*) fgContext)
     {
         auto result = ffxDestroyContext_Dx12FG(context, memCb);
@@ -380,6 +387,10 @@ ffxReturnCode_t ffxConfigure_Dx12(ffxContext* context, ffxConfigureDescHeader* d
     auto type = FfxApiProxy::GetType(desc->type);
     if (type == FFXStructType::SwapchainDX12 || type == FFXStructType::FG)
     {
+        // A plain swapchain stands in for AMD's: AMD's runtime has no swapchain or FG context to answer with
+        if ((context != nullptr && FfxPlainSwapchain::Owns(*context)) || FfxPlainSwapchain::Active())
+            return FfxPlainSwapchain::Configure(desc);
+
         ffxReturnCode_t result = PASSTHRU_RETURN_CODE;
 
         if (State::Instance().activeFgInput == FGInput::FSRFG)
@@ -421,6 +432,10 @@ ffxReturnCode_t ffxQuery_Dx12(ffxContext* context, ffxQueryDescHeader* desc)
 
     if (type == FFXStructType::SwapchainDX12 || type == FFXStructType::FG)
     {
+        // A plain swapchain stands in for AMD's: AMD's runtime has no swapchain or FG context to answer with
+        if ((context != nullptr && FfxPlainSwapchain::Owns(*context)) || FfxPlainSwapchain::Active())
+            return FfxPlainSwapchain::Query(desc);
+
         ffxReturnCode_t result = PASSTHRU_RETURN_CODE;
 
         if (State::Instance().activeFgInput == FGInput::FSRFG)
@@ -575,6 +590,10 @@ ffxReturnCode_t ffxDispatch_Dx12(ffxContext* context, ffxDispatchDescHeader* des
     auto type = FfxApiProxy::GetType(desc->type);
     if (type == FFXStructType::SwapchainDX12 || type == FFXStructType::FG)
     {
+        // A plain swapchain stands in for AMD's: AMD's runtime has no swapchain or FG context to answer with
+        if ((context != nullptr && FfxPlainSwapchain::Owns(*context)) || FfxPlainSwapchain::Active())
+            return FfxPlainSwapchain::Dispatch(desc);
+
         ffxReturnCode_t result = PASSTHRU_RETURN_CODE;
 
         if (State::Instance().activeFgInput == FGInput::FSRFG)
