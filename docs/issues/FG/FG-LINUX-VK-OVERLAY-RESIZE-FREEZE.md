@@ -138,7 +138,20 @@ Suspected cause, not proven:
 - On Windows DXGI copes with that. On Linux they are two Vulkan swapchains on one native window, which Vulkan does not
   allow.
 - After F11 both go out of date, and vkd3d-proton's present does not return.
-- Changing this needs its own investigation: the hidden present may keep the D3D11 back-buffer index advancing.
+
+What the hidden D3D11 swapchain is still used for (`OptiScaler/with_dx12/dx11_with_dx12_sc.cpp`):
+- While XeFG's swapchain exists, the bridge sends everything the game can wait on or read back to XeFG's swapchain:
+  - `GetFrameLatencyWaitableObject`, `SetMaximumFrameLatency` / `GetMaximumFrameLatency`;
+  - `GetFrameStatistics`, `GetLastPresentCount`;
+  - `SetFullscreenState` / `GetFullscreenState`, `GetFullscreenDesc`, `ResizeTarget`, `GetContainingOutput`.
+- Only `GetBuffer` and `GetCurrentBackBufferIndex` use the D3D11 swapchain. Every present, the bridge copies the buffer
+  at the reported index into XeFG's swapchain (`_GetDx11BackBufferIndexForPresent`, `_CopyDx11BackBufferToShared`).
+  - If that index stopped advancing, the bridge would still copy the image the game just rendered.
+  - In Metro 2033 Redux it is always 0 anyway (`dx11Index 0, real3Index 0` in every pre6 frame).
+- So under DXVK the hidden present does nothing the game depends on. It does put a second Vulkan swapchain on the
+  window.
+- No earlier attempt: no other issue document mentions the hidden present, and `git log` shows only the commit that
+  added it (`3fc6c8c3`).
 
 ## 5. Planned Solution
 
@@ -156,6 +169,12 @@ On `fix/linux-vk-overlay-resize-freeze`:
 - 4.1: `State::vulkanCreatingSC` is `static inline thread_local`. Same-thread nesting keeps working; the game's thread no
   longer sees a present thread's flag. Test: `tests/vulkan_creating_sc_thread_unit.cpp`.
 - Unchanged: when the overlay is created and destroyed, the DX overlay, and the `OverlayMenu` defaults.
+- 4.2 (planned, on `fix/linux-dx11wdx12-f11-hang`):
+  - With DXVK as the D3D11 layer (`IdentifyGpu::getPrimaryGpu().usesDxvk`), `Dx11wDx12SC::Present` no longer presents
+    the hidden D3D11 swapchain. Only XeFG's D3D12 swapchain presents to the window.
+  - The decision goes in a pure header, `with_dx12/Dx11wDx12PresentPolicy.h`.
+  - Windows without DXVK keeps the present exactly as it is.
+  - `DXGI_PRESENT_TEST` still goes to the D3D11 swapchain.
 
 Related history:
 - `5181a07a`: a different alt-tab deadlock (DLSS-G `_localMutex`).
