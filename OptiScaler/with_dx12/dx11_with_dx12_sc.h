@@ -131,7 +131,6 @@ class DECLSPEC_UUID("23b064bb-482d-416c-93b1-829acedfb3d0") Dx11wDx12SC final : 
 
     UINT _bufferCount = 0;
     UINT _currentFakeIndex = 0;
-    bool _hiddenPresentSkipLogged = false;
     DXGI_FORMAT _bufferFormat = DXGI_FORMAT_UNKNOWN;
     bool _interopInitialized = false;
 

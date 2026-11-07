@@ -1,6 +1,5 @@
 ﻿#include "pch.h"
 #include "dx11_with_dx12_sc.h"
-#include "Dx11wDx12PresentPolicy.h"
 
 #include <with_dx12/with_dx12.h>
 #include <dlssnr/DlssNrFeature_Dx12.h>
@@ -10,7 +9,6 @@
 
 #include <Util.h>
 #include <Config.h>
-#include <misc/IdentifyGpu.h>
 
 #include <d3d11.h>
 #include <d3d11_4.h>
@@ -344,9 +342,7 @@ HRESULT STDMETHODCALLTYPE Dx11wDx12SC::Present(UINT SyncInterval, UINT Flags)
               dx11Index, _real3 != nullptr ? _real3->GetCurrentBackBufferIndex() : 0xFFFFFFFF, _currentFakeIndex,
               _bufferCount);
 
-    // Under DXVK the hidden D3D11 swapchain is a second Vulkan swapchain on this window; presenting it next to
-    // vkd3d-proton's hung the game after F11 on Linux (FG-LINUX-VK-OVERLAY-RESIZE-FREEZE.md, section 4.2).
-    if (_real != nullptr && Dx11wDx12PresentPolicy::PresentHiddenDx11(IdentifyGpu::getPrimaryGpu().usesDxvk))
+    if (_real != nullptr)
     {
         UINT realFlags = Flags;
 
@@ -355,11 +351,6 @@ HRESULT STDMETHODCALLTYPE Dx11wDx12SC::Present(UINT SyncInterval, UINT Flags)
 
         if (FAILED(realPresentResult))
             LOG_WARN("hidden real DX11 Present failed: {:X}", (UINT) realPresentResult);
-    }
-    else if (_real != nullptr && !_hiddenPresentSkipLogged)
-    {
-        _hiddenPresentSkipLogged = true;
-        LOG_INFO("DXVK: not presenting the hidden DX11 swapchain; only the FG swapchain presents to the window");
     }
 
     auto result = _fgSwapChain->Present(SyncInterval, Flags);

@@ -169,7 +169,7 @@ On `fix/linux-vk-overlay-resize-freeze`:
 - 4.1: `State::vulkanCreatingSC` is `static inline thread_local`. Same-thread nesting keeps working; the game's thread no
   longer sees a present thread's flag. Test: `tests/vulkan_creating_sc_thread_unit.cpp`.
 - Unchanged: when the overlay is created and destroyed, the DX overlay, and the `OverlayMenu` defaults.
-- 4.2 (on `fix/linux-dx11wdx12-f11-hang`; test: `tests/dx11wdx12_hidden_present_unit.cpp`):
+- 4.2 (planned, on `fix/linux-dx11wdx12-f11-hang`):
   - With DXVK as the D3D11 layer (`IdentifyGpu::getPrimaryGpu().usesDxvk`), `Dx11wDx12SC::Present` no longer presents
     the hidden D3D11 swapchain. Only XeFG's D3D12 swapchain presents to the window.
   - The decision goes in a pure header, `with_dx12/Dx11wDx12PresentPolicy.h`.
