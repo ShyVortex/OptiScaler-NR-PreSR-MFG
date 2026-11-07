@@ -702,6 +702,9 @@ class Config
     CustomOptional<bool> FGDLSSGSmoothMotion {
         false
     }; // NVIDIA Smooth Motion pacing/interpolation via DRS (strictly opt-in, default false)
+    // NVSmooth30 loaded: let the game create its FSR-FG swapchain anyway (default off: refused,
+    // FfxSwapchainBlockPolicy.h)
+    CustomOptional<bool> SmoothMotionAllowGameFsrFgSwapchain { false };
     CustomOptional<bool> SmoothMotionNVSmooth30 {
         true
     }; // Sideload nvsmooth30.dll from OptiScaler directory on RTX 30 (SM86) cards

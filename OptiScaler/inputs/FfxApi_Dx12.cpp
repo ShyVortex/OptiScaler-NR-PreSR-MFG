@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "FfxApi_Dx12.h"
 
 #include "Util.h"
@@ -9,6 +9,8 @@
 #include "proxies/FfxApi_Proxy.h"
 
 #include "FG/FfxApi_Dx12_FG.h"
+#include "FfxSwapchainBlockPolicy.h"
+#include <framegen/smoothmotion/NVSmooth30Loader.h>
 
 #include "ffx_upscale.h"
 #include "dx12/ffx_api_dx12.h"
@@ -214,7 +216,8 @@ ffxReturnCode_t ffxCreateContext_Dx12(ffxContext* context, ffxCreateContextDescH
     const bool unaffectedOutput = state.activeFgOutput == FGOutput::NoFG || state.activeFgInput == FGInput::NvngxFG;
     const bool shouldCaptureGamesSwapchain = Config::Instance()->FGAlwaysCaptureFSRFGSwapchain.value_or_default() &&
                                              !unaffectedOutput && swapchainCreationType;
-    if (isFgType && (state.activeFgInput == FGInput::FSRFG || shouldCaptureGamesSwapchain))
+    const bool optiScalerTakesOver = isFgType && (state.activeFgInput == FGInput::FSRFG || shouldCaptureGamesSwapchain);
+    if (optiScalerTakesOver)
     {
         auto result = ffxCreateContext_Dx12FG(context, desc, memCb);
 
@@ -222,6 +225,18 @@ ffxReturnCode_t ffxCreateContext_Dx12(ffxContext* context, ffxCreateContextDescH
             return FfxApiProxy::D3D12_CreateContext(context, desc, memCb);
 
         return result;
+    }
+
+    // NVSmooth30 Smooth Motion crashes on FSR-FG's presenter thread: keep the game on a plain swapchain
+    const bool anySwapchainType =
+        swapchainCreationType || desc->type == FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_WRAP_DX12;
+    if (FfxSwapchainBlockPolicy::ShouldRefuseGameFsrFgSwapchain(
+            anySwapchainType, NVSmooth30Loader::LastStatus().DllLoaded,
+            Config::Instance()->SmoothMotionAllowGameFsrFgSwapchain.value_or_default(), optiScalerTakesOver))
+    {
+        LOG_WARN("FSR-FG swapchain ({}) refused: NVSmooth30 Smooth Motion is active",
+                 FfxApiProxy::GetTypeName(desc->type));
+        return FFX_API_RETURN_ERROR_RUNTIME_ERROR;
     }
 
     bool upscaleContext = false;

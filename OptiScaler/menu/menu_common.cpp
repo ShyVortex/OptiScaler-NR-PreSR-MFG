@@ -4237,6 +4237,15 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                            "Requires driver 571.86+ on Windows.\n"
                            "Note: A game restart is required for the unlocker to hook the DXGI presentation layer.");
 
+            bool allowFsrSc = config->SmoothMotionAllowGameFsrFgSwapchain.value_or_default();
+            if (ImGui::Checkbox("Let the game use its FSR FG swapchain (restart)##nv_smooth30_fsr", &allowFsrSc))
+                config->SmoothMotionAllowGameFsrFgSwapchain = allowFsrSc;
+            ShowHelpMarker(
+                "Off (default): while NVSmooth30 is loaded, the game's AMD FSR Frame Generation swapchain is\n"
+                "refused, so the game presents through a normal swapchain. NVIDIA Smooth Motion crashed on\n"
+                "the FSR swapchain's presenter thread (e.g. Neverness to Everness, even with FSR FG off).\n"
+                "On: leave the game's FSR FG swapchain alone.");
+
             ImGui::Text("NVSmooth30 Status:");
             ImGui::SameLine();
             if (nvSmoothStatus.DllLoaded)

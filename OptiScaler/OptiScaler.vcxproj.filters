@@ -173,6 +173,9 @@
     <ClInclude Include="inputs\FfxApi_Dx12.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="inputs\FfxSwapchainBlockPolicy.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="inputs\FSR2_Dx12.h">
       <Filter>Header Files</Filter>
     </ClInclude>
