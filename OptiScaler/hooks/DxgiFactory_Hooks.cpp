@@ -73,6 +73,24 @@ static bool PrepareDx12FlipFormat(DXGI_FORMAT& format)
     }
 }
 
+// NVSmooth30 loaded: log who creates the swapchain (NvPresent's factory hook sits above OptiScaler's) and, with the
+// [SmoothMotion] LeaveSmoothMotionSwapchainUnwrapped test switch, hand NvPresent's swapchain back unwrapped.
+static bool LeaveUnwrappedForNvPresent(const char* hook, void* returnAddress)
+{
+    const bool loaded = NVSmooth30Loader::LastStatus().DllLoaded;
+    if (!loaded)
+        return false;
+
+    const auto caller = Util::WhoIsTheCaller(returnAddress);
+    const bool leave = NVSmooth30Loader::ShouldLeaveSwapchainUnwrapped(
+        loaded, Config::Instance()->SmoothMotionLeaveSwapchainUnwrapped.value_or_default(),
+        NVSmooth30Loader::IsNvPresentModule(caller));
+
+    LOG_INFO("NVSmooth30: {} called by {}{}", hook, caller.empty() ? "unknown" : caller,
+             leave ? ", left unwrapped for NvPresent" : "");
+    return leave;
+}
+
 static bool IsNvSmooth30DummyWindow(HWND hWnd, UINT width, UINT height)
 {
     if (hWnd == nullptr)
@@ -441,6 +459,13 @@ HRESULT DxgiFactoryHooks::CreateSwapChain(IDXGIFactory* realFactory, IUnknown* p
         LOG_INFO("CreateSwapChain: Intercepted NVSmooth30 dummy swapchain probe; neutralizing DXGI vtable hijack to "
                  "protect D3D12/Streamline presentation.");
         return DXGI_ERROR_INVALID_CALL;
+    }
+
+    if (LeaveUnwrappedForNvPresent("CreateSwapChain", _ReturnAddress()))
+    {
+        ScopedSkipDxgiLoadChecks skipDxgiLoadChecks {};
+        ScopedSkipParentWrapping skipParentWrapping {};
+        return o_CreateSwapChain(realFactory, pDevice, pDesc, ppSwapChain);
     }
 
     if (State::Instance().vulkanCreatingSC)
@@ -823,6 +848,14 @@ HRESULT DxgiFactoryHooks::CreateSwapChainForHwnd(IDXGIFactory2* realFactory, IUn
         LOG_INFO("CreateSwapChainForHwnd: Intercepted NVSmooth30 dummy swapchain probe; neutralizing DXGI vtable "
                  "hijack to protect D3D12/Streamline presentation.");
         return DXGI_ERROR_INVALID_CALL;
+    }
+
+    if (LeaveUnwrappedForNvPresent("CreateSwapChainForHwnd", _ReturnAddress()))
+    {
+        ScopedSkipDxgiLoadChecks skipDxgiLoadChecks {};
+        ScopedSkipParentWrapping skipParentWrapping {};
+        return o_CreateSwapChainForHwnd(realFactory, pDevice, hWnd, pDesc, pFullscreenDesc, pRestrictToOutput,
+                                        ppSwapChain);
     }
 
     static bool firstCall = static_cast<bool>(State::Instance().gameQuirks & GameQuirk::NoFSRFGFirstSwapchain);

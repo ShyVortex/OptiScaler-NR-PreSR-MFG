@@ -705,6 +705,8 @@ class Config
     // NVSmooth30 loaded: let the game create its FSR-FG swapchain anyway (default off: refused,
     // FfxSwapchainBlockPolicy.h)
     CustomOptional<bool> SmoothMotionAllowGameFsrFgSwapchain { false };
+    // Test switch: hand NvPresent's swapchain back unwrapped (NVSmooth30Loader::ShouldLeaveSwapchainUnwrapped)
+    CustomOptional<bool> SmoothMotionLeaveSwapchainUnwrapped { false };
     CustomOptional<bool> SmoothMotionNVSmooth30 {
         true
     }; // Sideload nvsmooth30.dll from OptiScaler directory on RTX 30 (SM86) cards

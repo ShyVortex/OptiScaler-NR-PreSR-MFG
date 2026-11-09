@@ -208,6 +208,8 @@ bool Config::Reload(std::filesystem::path iniPath)
                 SmoothMotionNVSmooth30.set_from_config(nsOptF.value());
 
             SmoothMotionAllowGameFsrFgSwapchain.set_from_config(readBool("SmoothMotion", "AllowGameFsrFgSwapchain"));
+            SmoothMotionLeaveSwapchainUnwrapped.set_from_config(
+                readBool("SmoothMotion", "LeaveSmoothMotionSwapchainUnwrapped"));
 
             if (FGDLSSGAmpereMfgUnlock.value_or_default())
             {
@@ -1251,6 +1253,8 @@ bool Config::SaveIni(std::filesystem::path destination)
                      GetBoolValue(Instance()->SmoothMotionNVSmooth30.value_for_config()).c_str());
         ini.SetValue("SmoothMotion", "AllowGameFsrFgSwapchain",
                      GetBoolValue(Instance()->SmoothMotionAllowGameFsrFgSwapchain.value_for_config()).c_str());
+        ini.SetValue("SmoothMotion", "LeaveSmoothMotionSwapchainUnwrapped",
+                     GetBoolValue(Instance()->SmoothMotionLeaveSwapchainUnwrapped.value_for_config()).c_str());
         ini.SetValue("FrameGen", "DebugView", GetBoolValue(Instance()->FGDebugView.value_for_config()).c_str());
         std::string FGInputString = "auto";
         if (auto FGInputHeld = Instance()->FGInput.value_for_config(); FGInputHeld.has_value())
