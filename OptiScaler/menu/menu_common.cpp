@@ -1773,7 +1773,7 @@ void MenuCommon::RenderSplashWindow(RenderMenuContext& ctx)
                 else
                     ImGui::SetWindowFontScale(splashScale);
 
-                ImGui::Text("OptiScaler - %s for menu",
+                ImGui::Text("DLSS Unlocked - %s for menu",
                             Keybind::ShortcutLabel(config->ShortcutKey.value_or_default(),
                                                    config->ShortcutKeyRequireCtrl.value_or_default(),
                                                    config->ShortcutKeyRequireAlt.value_or_default())
