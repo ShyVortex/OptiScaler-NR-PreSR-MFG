@@ -514,3 +514,39 @@ This guarantees that extended Windows interfaces (`IDXGISwapChainMedia`) and pro
   - with the switch on: `left unwrapped for NvPresent`, no `LocalPresent … 80004002`, the game draws with no crash;
   - then whether the frame rate doubles.
   - If the caller is not `NvPresent64.dll`, the stack order assumed here is wrong and the switch does nothing.
+
+### 6.14 Confirmed in game; unwrapped by default (`a70ec350`)
+- **Report:** kilyan82, 2026-11-09, preview v0.9.88-pre4 (`3373b8f`) with `[SmoothMotion]
+  LeaveSmoothMotionSwapchainUnwrapped=true`. Neverness to Everness (DX12, UE5, ACE anti-cheat), RTX 3070 Ti, driver
+  621.01, OptiScaler as `winmm.dll`, NVSmooth30 0.1.1.
+- **Result:** "without the dll i get 95 fps, with nvsmooth30.dll i get 170 fps, almost double (in real game). In the
+  first screen ... 220 fps. The game runs, but optiscaler this way doesn't load." The last part means the in-game menu
+  doesn't open, as expected.
+- **The log confirms each step:**
+  - `NVSmooth30: CreateSwapChainForHwnd called by NvPresent64.dll, left unwrapped for NvPresent` (NvPresent's factory
+    hook does sit above OptiScaler's);
+  - `FSR-FG swapchain (…FOR_HWND_DX12) replaced by a plain swapchain`;
+  - 19 kernels with `sm89->86=1 rc=0`;
+  - DLSS evaluates every frame (3,179 `EvaluateFeature` calls).
+- **Default on (maintainer's decision):**
+  - the failure is OptiScaler's wrapper between NvPresent's proxy and the real swapchain, not the game or its
+    anti-cheat. johnCXVII's Cyberpunk 2077 (no anti-cheat; v0.9.31, 616.92) logged the same `LocalPresent Original
+    present result: 80004002` right after OptiScaler wrapped the swapchain;
+  - `SmoothMotionLeaveSwapchainUnwrapped` now defaults to `true`. It still only acts while `nvsmooth30.dll` is
+    loaded and `NvPresent64.dll` is the caller, and the caller is logged either way;
+  - the INI and the NVSmooth30 menu help say that the menu is unavailable while NVSmooth30 is active, and how to turn
+    it back off (`[DLSSG] SmoothMotion`, `[SmoothMotion] EnableNVSmooth30`).
+- **The NVSmooth30 path that works, end to end (6.6–6.14):**
+  1. NVSmooth30 0.1.1 (upstream PR 4) for drivers 621.01+ (6.7);
+  2. NVSmooth30 loads only after OptiScaler's DXGI hooks, so its dummy swapchain is always blocked (6.9);
+  3. a game's FSR-FG swapchain request is answered with a plain swapchain whose context holds a reference
+     (6.11, 6.12);
+  4. NvPresent's swapchain is left unwrapped (6.13, 6.14);
+  5. OptiScaler stays out of `crashclientreporter.exe` (6.11).
+- **Still open:**
+  - only this game is confirmed; johnCXVII's games (616.92) and DX11 games are untested with the full path;
+  - OptiScaler's menu, FG and HDR detection aren't available on NvPresent's swapchain;
+  - with the swapchain unwrapped, it is untested whether the plain-swapchain replacement (6.11) is still needed. It
+    stays: AMD's FSR presenter thread crashed NvPresent in 6.10 regardless of wrapping.
+- **Test:** `tests/nvsmooth30_unwrapped_swapchain_unit.cpp` (5/5 PASS; test 5 now checks default true and the INI and
+  menu wording). The other NVSmooth30 suites, `nr_ini_keys_unit` and `ampere_smooth_motion_unit` still pass.
