@@ -4231,11 +4231,25 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                     NVSmooth30Loader::TrySetup();
                 }
             }
-            ShowHelpMarker("NVSmooth30 Unlocker (placed in OptiScaler/nvsmooth30.dll):\n"
-                           "Patches NvPresent64 architecture gates and redirects CUDA kernels to SM86,\n"
-                           "allowing RTX 30 (Ampere) cards to run NVIDIA driver-level Smooth Motion.\n"
-                           "Requires driver 571.86+ on Windows.\n"
-                           "Note: A game restart is required for the unlocker to hook the DXGI presentation layer.");
+            ShowHelpMarker(
+                "NVSmooth30 Unlocker (placed in OptiScaler/nvsmooth30.dll):\n"
+                "Patches NvPresent64 architecture gates and redirects CUDA kernels to SM86,\n"
+                "allowing RTX 30 (Ampere) cards to run NVIDIA driver-level Smooth Motion.\n"
+                "Requires driver 571.86+ on Windows.\n"
+                "Note: A game restart is required for the unlocker to hook the DXGI presentation layer.\n"
+                "While NVSmooth30 is active, OptiScaler leaves Smooth Motion's swapchain unwrapped, so this\n"
+                "menu won't open from the next launch. Turn it back off in OptiScaler.ini ([DLSSG]\n"
+                "SmoothMotion or [SmoothMotion] EnableNVSmooth30).");
+
+            bool allowFsrSc = config->SmoothMotionAllowGameFsrFgSwapchain.value_or_default();
+            if (ImGui::Checkbox("Let the game use its FSR FG swapchain (restart)##nv_smooth30_fsr", &allowFsrSc))
+                config->SmoothMotionAllowGameFsrFgSwapchain = allowFsrSc;
+            ShowHelpMarker(
+                "Off (default): while NVSmooth30 is loaded, OptiScaler gives the game a normal swapchain in\n"
+                "place of AMD's FSR Frame Generation swapchain (FSR FG can't run then). NVIDIA Smooth Motion\n"
+                "crashed on the FSR swapchain's presenter thread (e.g. Neverness to Everness, even with\n"
+                "FSR FG off).\n"
+                "On: leave the game's FSR FG swapchain alone.");
 
             ImGui::Text("NVSmooth30 Status:");
             ImGui::SameLine();
@@ -4276,6 +4290,10 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             else if (!nvSmooth30)
             {
                 ImGui::TextDisabled("Disabled in config");
+            }
+            else if (nvSmoothStatus.WaitingForDxgiHooks)
+            {
+                ImGui::TextDisabled("Waiting for OptiScaler's DXGI hooks");
             }
             else if (!nvSmoothStatus.DllFound)
             {

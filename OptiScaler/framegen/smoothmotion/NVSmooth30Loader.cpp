@@ -8,6 +8,9 @@
 #include <misc/IdentifyGpu.h>
 #include <proxies/Ntdll_Proxy.h>
 #include <nvapi/NvApiHooks.h>
+#include <hooks/Dxgi_Hooks.h>
+
+#include <atomic>
 
 #include <mutex>
 
@@ -17,6 +20,7 @@ namespace
 {
 Status s_status;
 bool s_setupAttempted = false;
+std::atomic<bool> s_pendingDxgiHooks { false };
 std::recursive_mutex s_mutex;
 } // namespace
 
@@ -88,6 +92,19 @@ void TrySetup()
         return;
     }
 
+    // Load-order guard: the dummy-swapchain block lives in OptiScaler's DXGI factory hooks. Loading nvsmooth30.dll
+    // before they exist lets it patch the shared Present slots (DLSS Unlocked #42: Present recursion with the Steam
+    // overlay when OptiScaler runs as winmm.dll).
+    if (DecideLoadGate(DxgiHooks::FactoryHooksInstalled()) == LoadGate::WaitForDxgiHooks)
+    {
+        if (!s_pendingDxgiHooks.exchange(true))
+            LOG_INFO("NVSmooth30Loader: waiting for OptiScaler's DXGI hooks before loading nvsmooth30.dll");
+        s_status.WaitingForDxgiHooks = true;
+        return;
+    }
+    s_pendingDxgiHooks = false;
+    s_status.WaitingForDxgiHooks = false;
+
     // Resolve DLL path (strictly inside OptiScaler directory)
     auto basePath = Util::DllPath().parent_path();
     auto mainOverride =
@@ -140,6 +157,21 @@ void TrySetup()
     s_status.DllLoaded = true;
     s_status.ErrorMessage.clear();
     LOG_INFO("NVSmooth30Loader: NVSmooth30 loaded successfully from {}", wstring_to_string(dllPath.wstring()));
+}
+
+bool PendingDxgiHooks() { return s_pendingDxgiHooks.load(); }
+
+void RunPendingSetup()
+{
+    if (!s_pendingDxgiHooks.load() || !DxgiHooks::FactoryHooksInstalled())
+        return;
+
+    // Claim the pending setup first, so a DXGI factory created during TrySetup can't re-enter it
+    if (!s_pendingDxgiHooks.exchange(false))
+        return;
+
+    LOG_INFO("NVSmooth30Loader: DXGI hooks installed, running the deferred setup");
+    TrySetup();
 }
 
 void SanitizeEnvironment()

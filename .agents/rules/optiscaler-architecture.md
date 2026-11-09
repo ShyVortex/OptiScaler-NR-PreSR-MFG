@@ -189,9 +189,31 @@ description: Architecture, frame generation, and safety rules for OptiScaler
      - **Packaging & CI Workflow Integration**:
        - `package_release.ps1`: `[switch]$IncludeNVSmooth30` parameter, staging binary strictly to `OptiScaler/nvsmooth30.dll`, staging license, and dynamic cloning/building from `https://github.com/ItsAdeline/NVSmooth30.git` if local source/binary is absent.
        - `.github/workflows/package_release.yml`: `include_nvsmooth30` workflow_dispatch input, `Ensure NVSmooth30 files are present` step (cloning and building with CMake if missing), and parameter hashtable splatting.
+       - `-NVSmooth30Repository` / `-NVSmooth30Ref` (workflow inputs `nvsmooth30_repository` / `nvsmooth30_ref`): a ref is fetched and built in a temp directory; the package records its source in `OptiScaler/licenses/SOURCE.nvsmooth30.txt`. Never pin a commit in the repository.
+     - **Working Smooth Motion Path Under OptiScaler (verified in-game, Neverness to Everness, RTX 3070 Ti, driver 621.01, NVSmooth30 0.1.1: 95 → 170 fps; [DLSS Unlocked #42](https://github.com/ShyVortex/DLSS-Unlocked/issues/42))**:
+       - **Load order:** `NVSmooth30Loader::TrySetup` loads `nvsmooth30.dll` only after `DxgiHooks::FactoryHooksInstalled()` (`DecideLoadGate`). Until then it waits, and the `CreateDXGIFactory*` hooks run the deferred setup (`RunPendingSetup`, which claims the pending flag first). `DxgiHooks::Hook` keeps the factory hooks whenever Smooth Motion with NVSmooth30 is requested. Never load it earlier: as `winmm.dll`, NVSmooth30's dummy swapchain then escaped the block, and its Present hook recursed with the Steam overlay's until the stack overflowed.
+       - **Dummy swapchain block** (`IsNvSmooth30DummyWindow`, `DXGI_ERROR_INVALID_CALL`) stays. NVSmooth30's Present hooks are never needed: NvPresent attaches without them.
+       - **A game's FSR-FG swapchain** (`FRAMEGENERATIONSWAPCHAIN` `FOR_HWND` / `NEW` / `WRAP`) is answered by `FfxPlainSwapchain` while NVSmooth30 is loaded (`FfxSwapchainBlockPolicy::ShouldReplaceGameFsrFgSwapchain`; OptiScaler's own FSR-FG takeover runs first). NvPresent crashed on AMD's presenter thread, and the game creates the swapchain even with its FSR FG off.
+         - Never refuse the request instead: the game then created no swapchain at all (`0f566d5e`).
+         - The plain context must hold its own swapchain reference until `Destroy`, like AMD's provider (`reference tracked by internal_context`). Without it the swapchain was freed right after creation (`2b1001b7` → `25c99fd1`).
+         - Swapchain/FG Configure, Query, Dispatch and Destroy on it never reach AMD's runtime, and AMD's FG context is refused while it's active. The V2 GPU-memory query uses its own struct (`inputs/FG/FfxApi_Dx12_FG_Types.h`).
+         - Opt-out: `[SmoothMotion] AllowGameFsrFgSwapchain`.
+       - **NvPresent's swapchain is left unwrapped** (`[SmoothMotion] LeaveSmoothMotionSwapchainUnwrapped`, default true; `NVSmooth30Loader::ShouldLeaveSwapchainUnwrapped` + `IsNvPresentModule`).
+         - NvPresent's factory hook sits above OptiScaler's, and it hands out its own swapchain proxy around the inner swapchain (`[[proxy+0x18]+0x1588]`). On OptiScaler's wrapper the first present failed with `E_NOINTERFACE`, also in Cyberpunk 2077 (no anti-cheat).
+         - `CreateSwapChain` / `CreateSwapChainForHwnd` log the caller while NVSmooth30 is loaded, and pass `NvPresent64.dll`'s call through unwrapped.
+         - Cost: no OptiScaler menu, FG or HDR detection on that swapchain; upscaling still works. The INI and the NVSmooth30 menu help say so.
+       - **`crashclientreporter.exe`** is in the default `ProcessExclusionList`: the game's crash reporter loaded `winmm.dll` and overwrote the game's logs.
+       - **Diagnostics:** `SM86_DIAGNOSTICS=1` at `LogLevel` 0/1 (`WantsDiagnostics`). Attachment is probed from Present/Present1 per swapchain (`NvPresentAttach.h`), never in the wrapper constructor.
+       - Documentation: `docs/issues/FG/FG-NVSMOOTH30-INTEGRATION.md` (sections 6.6–6.14).
      - **Associated Automated Unit Tests**:
        - `tests/nvsmooth30_loader_unit.cpp`
        - `tests/ampere_smooth_motion_unit.cpp`
+       - `tests/nvsmooth30_attach_probe_unit.cpp`
+       - `tests/nvsmooth30_load_order_unit.cpp`
+       - `tests/nvsmooth30_fsr_swapchain_block_unit.cpp`
+       - `tests/nvsmooth30_unwrapped_swapchain_unit.cpp`
+       - `tests/nvsmooth30_packaging_source_unit.cpp`
+       - `tests/process_exclusion_defaults_unit.cpp`
 
 8. **Preservation of Unified Intel Xe Multi-Frame Generation (XeMFG) with Source Selection Across Upstream Merges**:
    - Upstream author (`wilsjo2`) does not maintain the Intel XeMFG unlocker or native multi-frame generation routing for XeFG (`libxess_fg.dll`).

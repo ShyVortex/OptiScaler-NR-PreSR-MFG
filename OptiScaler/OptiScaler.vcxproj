@@ -575,6 +575,9 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClInclude Include="upscalers\ffx\FFXFeature_Dx12.h" />
     <ClInclude Include="upscalers\ffx\FFXFeature_Vk.h" />
     <ClInclude Include="inputs\FfxApi_Dx12.h" />
+    <ClInclude Include="inputs\FfxSwapchainBlockPolicy.h" />
+    <ClInclude Include="inputs\FfxPlainSwapchain.h" />
+    <ClInclude Include="inputs\FG\FfxApi_Dx12_FG_Types.h" />
     <ClInclude Include="inputs\FSR2_Dx12.h" />
     <ClInclude Include="inputs\FSR3_Dx12.h" />
     <ClInclude Include="include\imgui\imconfig.h" />
@@ -853,6 +856,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClCompile Include="upscalers\IFeature.cpp" />
     <ClCompile Include="upscalers\IFeature_Dx12.cpp" />
     <ClCompile Include="inputs\FfxApi_Dx12.cpp" />
+    <ClCompile Include="inputs\FfxPlainSwapchain.cpp" />
     <ClCompile Include="inputs\FSR2_Dx12.cpp" />
     <ClCompile Include="inputs\FSR3_Dx12.cpp" />
     <ClCompile Include="hooks\D3D11_Hooks.cpp" />

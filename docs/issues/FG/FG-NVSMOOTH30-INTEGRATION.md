@@ -331,3 +331,222 @@ This guarantees that extended Windows interfaces (`IDXGISwapChainMedia`) and pro
   - no parse errors in both scripts and in the two changed inline steps; the YAML parses.
   - **Not yet:** a real installer build. Expected: the selection line shows 0.1.0 vs 0.1.1 → `.asi`, and the
     standalone zip contains a 0.1.1 `OptiScaler/nvsmooth30.dll`.
+
+### 6.9 NVSmooth30 0.1.1 on 621.01, and the Present recursion when OptiScaler runs as `winmm.dll` (`b78a42a4`)
+- **Report:** kilyan82, v0.9.86 (DLSS Unlocked NR-v0.9.86 with NVSmooth30 0.1.1), RTX 3070 Ti, driver 621.01,
+  Neverness to Everness (DX12, UE5), OptiScaler as `winmm.dll`. Two runs (2026-11-04, and 2026-11-05 with "Enable the
+  Steam Overlay while in-game" off). Both crash at start; without `nvsmooth30.dll` the game runs.
+- **PR 4 works on this driver:** `nvsmooth30.log` shows `startup 0.1.1`, `Diagnostics=1`, `cudart lazy table located
+  dynamically: resolver=+0x1362e0 slot=+0x771158` (as predicted in 6.7), and 19 kernel loads with `sm89->86=1 rc=0`.
+- **The crash:** `EXCEPTION_STACK_OVERFLOW`. Read from each `UEMinidump.dmp` (crashing thread's stack, module list):
+  - `nvsmooth30.dll+0x9076` → `gameoverlayrenderer64.dll+0x9c031` / `+0x9c20f` → `nvsmooth30.dll` again, 1,493 times
+    in both dumps;
+  - NVSmooth30's Present hook and the Steam overlay's forward into each other. The exact mechanism is unconfirmed (no
+    symbols). The overlay DLL was still loaded with the overlay switched off, so that test couldn't remove it.
+- **Why NVSmooth30 had Present hooks at all:**
+  - `nvsmooth30.log` says `DXGI Present hooks installed (slots 8 and 22)`, unlike every earlier log (`dummy D3D11
+    swapchain creation failed: 0x887A0001`);
+  - `OptiScaler.log`: `NVSmooth30Loader: Loading ...` at 18:09:41.22 / 18:12:48.43, the first `DxgiHooks::Hook` at
+    18:09:43.31 / 18:12:49.88;
+  - as `winmm.dll`, `CheckWorkingMode` finds no `dxgi.dll` and installs no DXGI hooks. `getGpuInfo` loads `dxgi.dll`
+    through `IdentifyGpu::checkGpuInfo` without hooking it, then calls `NVSmooth30Loader::TrySetup()`. So the 4.5 block
+    didn't exist yet when NVSmooth30 created its dummy swapchain;
+  - `DxgiHooks::Hook` also skipped installing anything without the overlay menu, FG or DXGI spoofing, so in that
+    configuration the block never existed.
+- **The fix (`b78a42a4`, Option A of `nvsmooth30_load_order_plan.md`):**
+  - `NVSmooth30Loader::DecideLoadGate`: `TrySetup` waits until `DxgiHooks::FactoryHooksInstalled()` (all three
+    `CreateDXGIFactory*` hooked), after the platform/GPU guards and before the DRS write, path resolution and load;
+  - the `CreateDXGIFactory*` hooks call `NVSmooth30Loader::RunPendingSetup()`: they run on game calls only, never in
+    `DllMain`, and before any swapchain. The pending flag is claimed first, so a factory created during setup can't
+    re-enter;
+  - `DxgiHooks::Hook` keeps the factory hooks whenever Smooth Motion with NVSmooth30 is requested;
+  - the menu shows "Waiting for OptiScaler's DXGI hooks".
+- **Why Option A (always block NVSmooth30's Present hooks):** NvPresent starts with the block in effect (johnCXVII's
+  616.92 logs loaded all kernels with the hooks blocked). If Smooth Motion still generates no frames with the block in
+  every proxy mode, keeping the hooks and handling the overlay collision (Option B) comes back.
+- **Test:** `tests/nvsmooth30_load_order_unit.cpp` (6/6 PASS). `nvsmooth30_attach_probe_unit`, `nvsmooth30_loader_unit`
+  and `ampere_smooth_motion_unit` still pass. clang-format 23 clean; UTF-8 BOM present.
+- **Expected in game (not yet checked):** `OptiScaler.log` shows `waiting for OptiScaler's DXGI hooks`, then `DXGI hooks
+  installed, running the deferred setup` and `Loading ... nvsmooth30.dll`; `nvsmooth30.log` shows `dummy D3D11
+  swapchain creation failed: 0x887A0001`; no crash. Then: does the frame rate double, and does the menu report the
+  swapchain as bound?
+
+### 6.10 NvPresent attaches, then crashes on the game's FSR-FG swapchain (`0f566d5e`)
+- **Report:** kilyan82, 2026-11-06, preview v0.9.87-pre1 (run 42185152692, with `b78a42a4`), same setup as 6.9. Still a
+  crash at start with `nvsmooth30.dll`; without it the game runs.
+- **The load-order fix works:** `waiting for OptiScaler's DXGI hooks` (17:26:15.6) → `running the deferred setup`
+  (17:26:18.6) → `Intercepted NVSmooth30 dummy swapchain probe`. `nvsmooth30.log`: `dummy D3D11 swapchain creation
+  failed: 0x887A0001`, `DXGI Present hooks failed`, 19 kernels with `sm89->86=1 rc=0`. The Steam overlay loop is gone.
+- **The new crash:** `EXCEPTION_ACCESS_VIOLATION reading address 0x18` at `D3D12Core.dll+0x1150f`. The crashing
+  thread, read upward from RSP in `UEMinidump.dmp`: `nvwgf2umx` / `D3D12Core` ← `NvPresent64.dll` (`+0x47f60`,
+  `+0x4a1c0`, `+0x32cc8`, … `+0x4a64f`) ← `amd_fidelityfx_framegeneration_dx12.dll+0x984d`, the start of FSR FG's
+  presenter thread. NvPresent attached, and fails on presents coming from FSR's presenter thread; the exact fault is
+  unknown (no symbols).
+- **The FSR-FG swapchain exists with FSR FG off:** `ffxCreateContext_Dx12 type:
+  CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_FOR_HWND_DX12` at 17:26:27.72, result 0. The reporter's
+  `GameUserSettings.ini` has `bFSRFrameGeneration=False`, `bUseFSR=False`, `bUseDLSS=True`. With `FGOutput=NoFG`,
+  `ffxCreateContext_Dx12` passed the desc to AMD's runtime. The exclusion in `NVSmooth30Loader::TrySetup` (4.2) covers
+  OptiScaler's and the external unlockers' frame generation, not a game's FSR-FG swapchain.
+- **The fix (`0f566d5e`, Option A of `nvsmooth30_fsr_swapchain_plan.md`):**
+  - `OptiScaler/inputs/FfxSwapchainBlockPolicy.h`: refuse a `FRAMEGENERATIONSWAPCHAIN` `FOR_HWND` / `NEW` / `WRAP` desc
+    when `nvsmooth30.dll` is loaded, the user hasn't opted out, and OptiScaler isn't taking the swapchain over itself;
+  - `ffxCreateContext_Dx12` applies it after OptiScaler's own FSR-FG takeover branch, logs `FSR-FG swapchain (...)
+    refused: NVSmooth30 Smooth Motion is active` and returns `FFX_API_RETURN_ERROR_RUNTIME_ERROR` without calling AMD's
+    runtime;
+  - opt-out `[SmoothMotion] AllowGameFsrFgSwapchain` (default false) and the menu checkbox "Let the game use its FSR FG
+    swapchain (restart)". `OptiScaler.ini` now documents the `[SmoothMotion]` section (`EnableNVSmooth30`,
+    `AllowGameFsrFgSwapchain`).
+  - Precedent: rule §4 refuses a game's XeSS-FG swapchain context under the external RTX 20/30 unlocker.
+- **Risk:** whether the game falls back cleanly to a plain swapchain when the context fails is unknown until tested.
+  If it doesn't, Option B (OptiScaler creates a plain swapchain and answers the FSR context calls itself) is next.
+- **Test:** `tests/nvsmooth30_fsr_swapchain_block_unit.cpp` (5/5 PASS). The NVSmooth30 suites, `nr_ini_keys_unit` and
+  `dlssg_sm86_v030_ini_unit` still pass. clang-format 23 clean; UTF-8 BOM present.
+- **Expected in game (not yet checked):** the refusal line in `OptiScaler.log`; a `WrappedIDXGISwapChain4` created
+  without `amd_fidelityfx_framegeneration_dx12.dll` callers; no crash; then whether the frame rate doubles.
+
+### 6.11 Refusing the FSR-FG swapchain leaves no picture; a plain swapchain instead (`f9933bc5`, `2b1001b7`)
+- **Reports (kilyan82, 2026-11-07, preview v0.9.88-pre1 with `0f566d5e`):** the game boots and plays audio, but only
+  the desktop and the game cursor are visible.
+- **First log, from the wrong process:**
+  - `CheckQuirks Game's Exe: CrashClientReporter.exe`. The game starts its crash reporter from the same folder; it
+    loads `winmm.dll`, so OptiScaler, `nvsmooth30.dll` and the Smooth Motion DRS write ran inside it;
+  - that instance truncated the game's `OptiScaler.log` at 12:17:29.83 and overwrote `nvsmooth30.log`; only the
+    game's `EvaluateFeature` lines were left interleaved;
+  - the default `ProcessExclusionList` had `crashreportclient.exe`, not `crashclientreporter.exe`.
+- **Second log, the game process (`[ProcessFilter] TargetProcessName=HTGame.exe`):**
+  - `ffxCreateContext_Dx12 type: CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_FOR_HWND_DX12` → `refused: NVSmooth30
+    Smooth Motion is active` (17:33:49.96);
+  - afterwards no `CreateSwapChain*` call at all, while DLSS evaluates 3,588 frames until 17:34:29. The game doesn't
+    fall back to a plain swapchain: Option A fails.
+- **Fixes:**
+  - `f9933bc5`: `crashclientreporter.exe` joins the default `ProcessExclusionList` (`Config.h`).
+  - `2b1001b7` (Option B of `nvsmooth30_plain_swapchain_plan.md`):
+    - `OptiScaler/inputs/FfxPlainSwapchain.h/.cpp` answers the request with a plain swapchain built from the game's own
+      desc through its hooked factory: `FOR_HWND` → `CreateSwapChainForHwnd(gameQueue, hwnd, desc, fullscreenDesc)`,
+      `NEW` → `CreateSwapChain(gameQueue, desc)`, `WRAP` keeps the game's swapchain. It returns an OptiScaler sentinel
+      context and logs `FSR-FG swapchain (...) replaced by a plain swapchain`. This mirrors the swapchain creation of
+      OptiScaler's own FSR-FG takeover (`ffxCreateContext_Dx12FG`), without needing OptiScaler's FG;
+    - while it's active, `ffxDestroyContext_Dx12` / `ffxConfigure_Dx12` / `ffxQuery_Dx12` / `ffxDispatch_Dx12` route
+      swapchain and FG calls to it, never to AMD's runtime. Configure and dispatch are no-ops; GPU memory queries
+      report 0; the interpolation command list / texture queries return none with an error. Each type is logged
+      once (`... answered by OptiScaler`);
+    - AMD's frame-generation context (`CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION`) is refused while a plain swapchain
+      is active: it needs AMD's swapchain;
+    - the V2 GPU-memory query struct (`ffxQueryFrameGenerationSwapChainGetGPUMemoryUsageDX12V2`) moves to
+      `OptiScaler/inputs/FG/FfxApi_Dx12_FG_Types.h`: its memory pointer comes after the device, sizes and formats, not
+      right after the header as in V1;
+    - the gate is `FfxSwapchainBlockPolicy::ShouldReplaceGameFsrFgSwapchain` (renamed from `ShouldRefuse...`). The
+      opt-out `[SmoothMotion] AllowGameFsrFgSwapchain` is unchanged.
+- **Test:** `tests/nvsmooth30_fsr_swapchain_block_unit.cpp` (6/6 PASS), `tests/process_exclusion_defaults_unit.cpp`
+  (3/3 PASS). The NVSmooth30 suites, `nr_ini_keys_unit` and `ampere_smooth_motion_unit` still pass. clang-format 23
+  clean; UTF-8 BOM present. The ffx struct layouts were checked against `ffx_api_dx12.h` / `ffx_framegeneration.h` at
+  the pinned FidelityFX-SDK submodule commit `c6efa6bf`.
+- **Expected in game (not yet checked):**
+  - `OptiScaler.log` (from `HTGame.exe`) shows `replaced by a plain swapchain` and a `WrappedIDXGISwapChain4` created;
+  - the game draws, with no crash;
+  - then: does the frame rate double, and does the menu report the swapchain bound?
+
+### 6.12 The plain swapchain was freed right after creation (`25c99fd1`)
+- **Report:** kilyan82, 2026-11-07, preview v0.9.88-pre2 (`8158f5d8`, with `2b1001b7`), `TargetProcessName=HTGame.exe`.
+  The game crashes again (Unreal crash reporter).
+- **What worked:**
+  - `FSR-FG swapchain (CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_FOR_HWND_DX12) replaced by a plain swapchain`;
+  - `WrappedIDXGISwapChain4 1 created` (18:01:25.68);
+  - NvPresent converted all 19 kernels (`sm89->86=1 rc=0`).
+- **The fault:**
+  - right after `Create` returned, the wrapper's count went `AddRef Count: 2` (caller `NvPresent64.dll`) → `Release
+    Count: 1` → `Release Count: 0` → `Real swapchain released, refCount: 0` (18:01:25.83);
+  - the crash is `EXCEPTION_ACCESS_VIOLATION writing address 0x15f0` at `ntdll.dll+0x1ceed`, from NvPresent's present
+    path (`NvPresent64.dll+0x4a6cc` → `+0x17585`, called from `HTGame.exe`): the game presented on the freed swapchain.
+- **Root cause:** AMD's provider (`ffx-api/src/dx12/ffx_provider_framegenerationswapchain_dx12.cpp` at the pinned
+  `c6efa6bf`) does `internal_context->fiSwapChain->AddRef(); // reference tracked by internal_context` for `WRAP`,
+  `NEW` and `FOR_HWND`, and `fiSwapChain->Release()` in `DestroyContext`. The game releases the extra reference it got
+  and relies on the context's. `FfxPlainSwapchain` took none.
+- **The fix (`25c99fd1`):** each plain context is its own record (`PlainContext { IUnknown* swapchain }`); the context
+  value is the record's address and `Owns` checks the live-record set. `Create` AddRefs the swapchain after every
+  successful path, and `Destroy` Releases it once for an owned record and frees the record.
+- **Test:** `tests/nvsmooth30_fsr_swapchain_block_unit.cpp` (7/7 PASS; test 7 is the reference). The other NVSmooth30
+  suites and `process_exclusion_defaults_unit` still pass. clang-format 23 clean; UTF-8 BOM present.
+- **Expected in game (not yet checked):** after `replaced by a plain swapchain`, no `Release Count: 0` for the wrapper;
+  the game draws with no crash; then whether the frame rate doubles.
+
+### 6.13 First-present `E_NOINTERFACE`: NvPresent wraps OptiScaler's wrapper; test switch (`0d8a9dd8`)
+- **Report:** kilyan82, 2026-11-07, preview v0.9.88-pre3 (with `25c99fd1`):
+  - the plain swapchain survives (no `Release Count: 0`), and OptiScaler's menu initialises on the first frame;
+  - the first real `Present` returns `80004002` (`LocalPresent Original present result: 80004002`, 18:42:16.438);
+  - then `EXCEPTION_ACCESS_VIOLATION reading address 0x28` in `D3D12Core`, called from `NvPresent64` (no minidump).
+  - This is johnCXVII's 616.92 symptom (6.2), now on a plain swapchain.
+- **Standalone comparison impossible:** with OptiScaler removed and `nvsmooth30.dll` as `version.dll`, no
+  `nvsmooth30.log` is created: the game doesn't load `version.dll` from its folder.
+- **Offline analysis of `nvpresent64.dll` 621.01** (sha256 `f23546294c601cd5c2274ed855e76c1e63c8f77236b0f494429e99a6a7163ea6`):
+  - NvPresent hands its caller its own `IDXGISwapChain4` proxy (vtable `0x1f2068`, 42 slots). The proxy keeps
+    NvPresent's wrapper at `+0x18`, and the wrapper keeps the inner swapchain at `+0x1588`.
+  - **`QueryInterface` (`0x35da0`):** `IUnknown`, `IDXGIObject`, `IDXGIDeviceSubObject` and the five swapchain IIDs
+    at `0x1f2250` (`IDXGISwapChain` … `IDXGISwapChain4`) are answered by the proxy; every other IID goes to the inner
+    swapchain.
+  - **`Present` (`0x35d80`):** a `DXGI_PRESENT_TEST` call goes to the inner swapchain's `Present`; every other call
+    takes path `0x4a600`, which queues the frame for NvPresent's presenter and always returns `S_OK`.
+  - **`ResizeBuffers` / `ResizeBuffers1` (slots 13 and 39):** `mov rcx,[rcx+0x18]; jmp 0x4a690`. `0x4a690` first
+    locks `+0x15e8`, which explains the pre2 crash (6.12): write to `0x15f0` with `this` = 0 on the freed object.
+  - `E_NOINTERFACE` (`0x80004002`) doesn't occur anywhere in the DLL: NvPresent only passes it on.
+- **The order in the stack:** every NvPresent-attached log shows `WrappedIDXGISwapChain4::QueryInterface Caller:
+  NvPresent64.dll` / `AddRef` right after creation. NvPresent's inner swapchain is therefore OptiScaler's wrapper:
+  - NvPresent's factory hook sits above OptiScaler's;
+  - the chain is game → NvPresent proxy → OptiScaler wrapper → real swapchain;
+  - NvPresent is built to wrap the real swapchain.
+
+  Since NvPresent's `Present` always returns `S_OK`, the logged `E_NOINTERFACE` is most likely the real `Present` that
+  OptiScaler's `LocalPresent` calls when NvPresent's presenter presents through OptiScaler's wrapper. Why the real
+  swapchain refuses that call isn't visible offline.
+- **The test switch (`0d8a9dd8`):**
+  - while NVSmooth30 is loaded, `DxgiFactoryHooks::CreateSwapChain` / `CreateSwapChainForHwnd` log the caller:
+    `NVSmooth30: CreateSwapChainForHwnd called by <module>`;
+  - `[SmoothMotion] LeaveSmoothMotionSwapchainUnwrapped` (default false; `NVSmooth30Loader::ShouldLeaveSwapchainUnwrapped`
+    + `IsNvPresentModule`): a swapchain created by `NvPresent64.dll` through OptiScaler's hook goes back unwrapped
+    through the existing pass-through (`o_CreateSwapChain*` inside `ScopedSkipDxgiLoadChecks` /
+    `ScopedSkipParentWrapping`), logged `left unwrapped for NvPresent`;
+  - with the switch on, that swapchain has no OptiScaler menu, FG, HDR detection or attachment probe. Upscaling through
+    NGX still works, and the key is INI-only.
+- **Test:** `tests/nvsmooth30_unwrapped_swapchain_unit.cpp` (5/5 PASS). The other NVSmooth30 suites, `nr_ini_keys_unit`
+  and `ampere_smooth_motion_unit` still pass. clang-format 23 clean; UTF-8 BOM present.
+- **Expected in game (not yet checked):**
+  - the caller line names `NvPresent64.dll`;
+  - with the switch on: `left unwrapped for NvPresent`, no `LocalPresent … 80004002`, the game draws with no crash;
+  - then whether the frame rate doubles.
+  - If the caller is not `NvPresent64.dll`, the stack order assumed here is wrong and the switch does nothing.
+
+### 6.14 Confirmed in game; unwrapped by default (`a70ec350`)
+- **Report:** kilyan82, 2026-11-09, preview v0.9.88-pre4 (`3373b8f`) with `[SmoothMotion]
+  LeaveSmoothMotionSwapchainUnwrapped=true`. Neverness to Everness (DX12, UE5, ACE anti-cheat), RTX 3070 Ti, driver
+  621.01, OptiScaler as `winmm.dll`, NVSmooth30 0.1.1.
+- **Result:** "without the dll i get 95 fps, with nvsmooth30.dll i get 170 fps, almost double (in real game). In the
+  first screen ... 220 fps. The game runs, but optiscaler this way doesn't load." The last part means the in-game menu
+  doesn't open, as expected.
+- **The log confirms each step:**
+  - `NVSmooth30: CreateSwapChainForHwnd called by NvPresent64.dll, left unwrapped for NvPresent` (NvPresent's factory
+    hook does sit above OptiScaler's);
+  - `FSR-FG swapchain (…FOR_HWND_DX12) replaced by a plain swapchain`;
+  - 19 kernels with `sm89->86=1 rc=0`;
+  - DLSS evaluates every frame (3,179 `EvaluateFeature` calls).
+- **Default on (maintainer's decision):**
+  - the failure is OptiScaler's wrapper between NvPresent's proxy and the real swapchain, not the game or its
+    anti-cheat. johnCXVII's Cyberpunk 2077 (no anti-cheat; v0.9.31, 616.92) logged the same `LocalPresent Original
+    present result: 80004002` right after OptiScaler wrapped the swapchain;
+  - `SmoothMotionLeaveSwapchainUnwrapped` now defaults to `true`. It still only acts while `nvsmooth30.dll` is
+    loaded and `NvPresent64.dll` is the caller, and the caller is logged either way;
+  - the INI and the NVSmooth30 menu help say that the menu is unavailable while NVSmooth30 is active, and how to turn
+    it back off (`[DLSSG] SmoothMotion`, `[SmoothMotion] EnableNVSmooth30`).
+- **The NVSmooth30 path that works, end to end (6.6–6.14):**
+  1. NVSmooth30 0.1.1 (upstream PR 4) for drivers 621.01+ (6.7);
+  2. NVSmooth30 loads only after OptiScaler's DXGI hooks, so its dummy swapchain is always blocked (6.9);
+  3. a game's FSR-FG swapchain request is answered with a plain swapchain whose context holds a reference
+     (6.11, 6.12);
+  4. NvPresent's swapchain is left unwrapped (6.13, 6.14);
+  5. OptiScaler stays out of `crashclientreporter.exe` (6.11).
+- **Still open:**
+  - only this game is confirmed; johnCXVII's games (616.92) and DX11 games are untested with the full path;
+  - OptiScaler's menu, FG and HDR detection aren't available on NvPresent's swapchain;
+  - with the swapchain unwrapped, it is untested whether the plain-swapchain replacement (6.11) is still needed. It
+    stays: AMD's FSR presenter thread crashed NvPresent in 6.10 regardless of wrapping.
+- **Test:** `tests/nvsmooth30_unwrapped_swapchain_unit.cpp` (5/5 PASS; test 5 now checks default true and the INI and
+  menu wording). The other NVSmooth30 suites, `nr_ini_keys_unit` and `ampere_smooth_motion_unit` still pass.

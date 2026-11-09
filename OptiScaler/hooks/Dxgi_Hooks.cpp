@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "Dxgi_Hooks.h"
 
 #include "DxgiFactory_Hooks.h"
@@ -11,6 +11,7 @@
 #include <DllNames.h>
 #include <misc/IdentifyGpu.h>
 #include <with_dx12/with_dx12.h>
+#include <framegen/smoothmotion/NVSmooth30Loader.h>
 
 #include "Hook_Utils.h"
 
@@ -91,6 +92,8 @@ inline static HRESULT hkCreateDXGIFactory(REFIID riid, IDXGIFactory** ppFactory)
     auto caller = Util::WhoIsTheCaller(_ReturnAddress());
     LOG_DEBUG("Caller: {}", caller);
 
+    NVSmooth30Loader::RunPendingSetup();
+
     if (creatingD3D12DeviceForLuma)
     {
         LOG_DEBUG("Bypassing hooking/wrapping during Luma D3D12 device creation");
@@ -150,6 +153,8 @@ inline static HRESULT hkCreateDXGIFactory1(REFIID riid, IDXGIFactory1** ppFactor
     auto caller = Util::WhoIsTheCaller(_ReturnAddress());
     LOG_DEBUG("Caller: {}", caller);
 
+    NVSmooth30Loader::RunPendingSetup();
+
     if (creatingD3D12DeviceForLuma)
     {
         LOG_DEBUG("Bypassing hooking/wrapping during Luma D3D12 device creation");
@@ -207,6 +212,8 @@ inline static HRESULT hkCreateDXGIFactory2(UINT Flags, REFIID riid, IDXGIFactory
 {
     auto caller = Util::WhoIsTheCaller(_ReturnAddress());
     LOG_DEBUG("Caller: {}", caller);
+
+    NVSmooth30Loader::RunPendingSetup();
 
     if (creatingD3D12DeviceForLuma)
     {
@@ -266,11 +273,15 @@ void DxgiHooks::Hook()
 {
     std::lock_guard<std::mutex> lock(hookMutex);
 
+    // NVSmooth30 needs the factory hooks: they reject its dummy swapchain (NVSmooth30Loader::DecideLoadGate)
+    const bool nvSmooth30 = Config::Instance()->FGDLSSGSmoothMotion.value_or_default() &&
+                            Config::Instance()->SmoothMotionNVSmooth30.value_or_default();
+
     // If not spoofing and
     // using no frame generation (or Nukem's) and
     // not using DXGI spoofing we don't need DXGI hooks
     // Probably I forgot something but we can add it later
-    if (!Config::Instance()->OverlayMenu.value_or_default() &&
+    if (!nvSmooth30 && !Config::Instance()->OverlayMenu.value_or_default() &&
         (Config::Instance()->FGInput.value_or_default() == FGInput::NoFG ||
          Config::Instance()->FGInput.value_or_default() == FGInput::NvngxFG) &&
         !Config::Instance()->DxgiSpoofing.value_or_default())
@@ -291,4 +302,10 @@ void DxgiHooks::Hook()
 
     if (o_CreateDXGIFactory2 == nullptr)
         o_CreateDXGIFactory2 = DxgiProxy::Hook_CreateDxgiFactory2(hkCreateDXGIFactory2);
+}
+
+bool DxgiHooks::FactoryHooksInstalled()
+{
+    std::lock_guard<std::mutex> lock(hookMutex);
+    return o_CreateDXGIFactory != nullptr && o_CreateDXGIFactory1 != nullptr && o_CreateDXGIFactory2 != nullptr;
 }

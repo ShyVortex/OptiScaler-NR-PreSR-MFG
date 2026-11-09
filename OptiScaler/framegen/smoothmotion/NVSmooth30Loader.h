@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <string_view>
 
 namespace NVSmooth30Loader
 {
@@ -15,6 +16,7 @@ struct Status
     bool SwapchainAttached = false;     // NvPresent64.dll detected on the current DXGI swapchain
     bool LoadedBeforeSwapchain = false; // nvsmooth30.dll was loaded before the current swapchain was created
     bool ProbeDone = false;             // The attachment probe window of the current swapchain has closed
+    bool WaitingForDxgiHooks = false;   // Setup deferred until OptiScaler's DXGI factory hooks are installed
     int SwapchainId = 0;                // OptiScaler id of the current (most recently created) swapchain
     std::wstring LoadedDllPath;         // Absolute path of loaded DLL
     std::string ErrorMessage;           // Human-readable error if anything failed
@@ -37,6 +39,50 @@ void SetSwapchainAttached(int swapchainId);
 
 /// Records that the probe window of the swapchain closed. Ignored for a swapchain that is no longer current.
 void SetProbeDone(int swapchainId);
+
+/// nvsmooth30.dll creates a 16x16 D3D11 swapchain at load to patch the shared DXGI Present slots. OptiScaler rejects it
+/// in its DXGI factory hooks (DxgiFactory_Hooks.cpp), so the DLL may only load once those hooks are installed.
+enum class LoadGate
+{
+    Load,
+    WaitForDxgiHooks
+};
+constexpr LoadGate DecideLoadGate(bool dxgiFactoryHooksInstalled)
+{
+    return dxgiFactoryHooksInstalled ? LoadGate::Load : LoadGate::WaitForDxgiHooks;
+}
+
+/// True while a setup is deferred until the DXGI factory hooks are installed (cheap, lock-free).
+bool PendingDxgiHooks();
+
+/// Runs a deferred setup. Called from OptiScaler's CreateDXGIFactory* hooks, which run on game calls only.
+void RunPendingSetup();
+
+/// True for NVIDIA's Smooth Motion presenter module, as Util::WhoIsTheCaller reports it (file name, any case).
+inline bool IsNvPresentModule(std::string_view module)
+{
+    constexpr std::string_view name = "nvpresent64.dll";
+    if (module.size() != name.size())
+        return false;
+    for (size_t i = 0; i < name.size(); i++)
+    {
+        char c = module[i];
+        if (c >= 'A' && c <= 'Z')
+            c = static_cast<char>(c - 'A' + 'a');
+        if (c != name[i])
+            return false;
+    }
+    return true;
+}
+
+/// DLSS Unlocked #42 (confirmed in game, default on): NvPresent's factory hook sits above OptiScaler's and wraps
+/// OptiScaler's swapchain wrapper, while it is built to wrap the real swapchain. With [SmoothMotion]
+/// LeaveSmoothMotionSwapchainUnwrapped, a swapchain NvPresent creates through OptiScaler's hook is handed back
+/// unwrapped (FG-NVSMOOTH30-INTEGRATION.md 6.13).
+constexpr bool ShouldLeaveSwapchainUnwrapped(bool nvSmooth30Loaded, bool switchOn, bool callerIsNvPresent)
+{
+    return nvSmooth30Loaded && switchOn && callerIsNvPresent;
+}
 
 /// Whether NVSmooth30's SM86_DIAGNOSTICS logging is turned on for an OptiScaler log level (0 = Trace, 1 = Debug).
 /// It only adds log lines in nvsmooth30.log (e.g. CUDA kernel loads it left unmodified).

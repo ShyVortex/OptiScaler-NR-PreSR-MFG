@@ -548,7 +548,7 @@ class Config
         L"qtwebengineprocess.exe|platformprocess.exe|bugsplathd64.exe|bssndrpt64.exe|pspcsdkappmgr.exe|pspcsdkcore.exe|"
         L"pspcsdkstttts.exe|pspcsdktelemetry.exe|pspcsdkui.exe|pspcsdkupdatechecker.exe|pspcsdkvoicechat.exe|"
         L"pspcsdkwebview.exe|windhawk.exe|vscodium.exe|crash_reporter.exe|steamerrorreporter64.exe|crashreportclient."
-        L"exe|edcefcrashpadprocess.exe|edcefrenderprocess.exe"
+        L"exe|edcefcrashpadprocess.exe|edcefrenderprocess.exe|crashclientreporter.exe"
     };
 
     // Hotfixes
@@ -702,6 +702,13 @@ class Config
     CustomOptional<bool> FGDLSSGSmoothMotion {
         false
     }; // NVIDIA Smooth Motion pacing/interpolation via DRS (strictly opt-in, default false)
+    // NVSmooth30 loaded: let the game create its FSR-FG swapchain anyway (default off: refused,
+    // FfxSwapchainBlockPolicy.h)
+    CustomOptional<bool> SmoothMotionAllowGameFsrFgSwapchain { false };
+    // Hand NvPresent's swapchain back unwrapped while NVSmooth30 is loaded
+    // (NVSmooth30Loader::ShouldLeaveSwapchainUnwrapped). Default on: NvPresent fails on OptiScaler's wrapper (DLSS
+    // Unlocked #42); it costs OptiScaler's menu on that swapchain.
+    CustomOptional<bool> SmoothMotionLeaveSwapchainUnwrapped { true };
     CustomOptional<bool> SmoothMotionNVSmooth30 {
         true
     }; // Sideload nvsmooth30.dll from OptiScaler directory on RTX 30 (SM86) cards
