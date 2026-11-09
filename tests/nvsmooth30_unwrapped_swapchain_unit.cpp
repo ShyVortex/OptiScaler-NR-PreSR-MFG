@@ -11,7 +11,8 @@
 // D3D12Core. Offline (nvpresent64.dll 621.01) NvPresent hands out its own swapchain proxy wrapping an inner swapchain,
 // and the logs show NvPresent QIs OptiScaler's WrappedIDXGISwapChain4: NvPresent's factory hook sits above OptiScaler's
 // and wraps OptiScaler's wrapper. The [SmoothMotion] LeaveSmoothMotionSwapchainUnwrapped test switch hands NvPresent's
-// swapchain back unwrapped (FG-NVSMOOTH30-INTEGRATION.md 6.13).
+// swapchain back unwrapped (FG-NVSMOOTH30-INTEGRATION.md 6.13). Confirmed in game (95 -> 170 fps), now default on
+// (6.14).
 //
 // Validates:
 // 1. IsNvPresentModule matches nvpresent64.dll in any case, and nothing else.
@@ -19,7 +20,8 @@
 // 3. CreateSwapChain and CreateSwapChainForHwnd check it right after the NVSmooth30 dummy block, before any wrapping,
 //    and pass through via o_CreateSwapChain* inside ScopedSkipDxgiLoadChecks / ScopedSkipParentWrapping.
 // 4. The helper logs the caller whenever NVSmooth30 is loaded, switch on or off, and reads the switch.
-// 5. Config, INI load/save and the shipped OptiScaler.ini (default auto = false, in [SmoothMotion]).
+// 5. Config, INI load/save and the shipped OptiScaler.ini (default auto = true since the 2026-11-09 in-game
+//    confirmation, in [SmoothMotion]); the menu help explains the trade-off.
 
 static std::string ReadFile(const char* path)
 {
@@ -117,7 +119,7 @@ int main()
     // Test 5
     {
         const auto h = Squash(ReadFile("OptiScaler/Config.h"));
-        assert(h.find("CustomOptional<bool>SmoothMotionLeaveSwapchainUnwrapped{false};") != std::string::npos);
+        assert(h.find("CustomOptional<bool>SmoothMotionLeaveSwapchainUnwrapped{true};") != std::string::npos);
         const auto cpp = Squash(ReadFile("OptiScaler/Config.cpp"));
         assert(cpp.find("SmoothMotionLeaveSwapchainUnwrapped.set_from_config(readBool(\"SmoothMotion\","
                         "\"LeaveSmoothMotionSwapchainUnwrapped\"));") != std::string::npos);
@@ -127,8 +129,16 @@ int main()
         const auto section = At(ini, "[SmoothMotion]");
         assert(At(ini, "LeaveSmoothMotionSwapchainUnwrapped=auto") > section);
         assert(ini.find("\n[", section + 1) == std::string::npos);
+        assert(ini.find("; true or false - Default (auto) is true\nLeaveSmoothMotionSwapchainUnwrapped=auto") !=
+                   std::string::npos ||
+               ini.find("; true or false - Default (auto) is true\r\nLeaveSmoothMotionSwapchainUnwrapped=auto") !=
+                   std::string::npos);
+        const auto menu = Squash(ReadFile("OptiScaler/menu/menu_common.cpp"));
+        assert(menu.find("WhileNVSmooth30isactive,OptiScalerleavesSmoothMotion'sswapchainunwrapped") !=
+               std::string::npos);
     }
-    std::puts("Test 5 PASS: [SmoothMotion] LeaveSmoothMotionSwapchainUnwrapped, default false");
+    std::puts(
+        "Test 5 PASS: [SmoothMotion] LeaveSmoothMotionSwapchainUnwrapped, default true, documented in INI and menu");
 
     std::puts("All 5 NVSmooth30 unwrapped swapchain tests passed.");
     return 0;

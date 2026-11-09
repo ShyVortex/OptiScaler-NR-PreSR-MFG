@@ -75,9 +75,10 @@ inline bool IsNvPresentModule(std::string_view module)
     return true;
 }
 
-/// Test switch (DLSS Unlocked #42): NvPresent's factory hook sits above OptiScaler's and wraps OptiScaler's swapchain
-/// wrapper, while it is built to wrap the real swapchain. With [SmoothMotion] LeaveSmoothMotionSwapchainUnwrapped, a
-/// swapchain NvPresent creates through OptiScaler's hook is handed back unwrapped (FG-NVSMOOTH30-INTEGRATION.md 6.13).
+/// DLSS Unlocked #42 (confirmed in game, default on): NvPresent's factory hook sits above OptiScaler's and wraps
+/// OptiScaler's swapchain wrapper, while it is built to wrap the real swapchain. With [SmoothMotion]
+/// LeaveSmoothMotionSwapchainUnwrapped, a swapchain NvPresent creates through OptiScaler's hook is handed back
+/// unwrapped (FG-NVSMOOTH30-INTEGRATION.md 6.13).
 constexpr bool ShouldLeaveSwapchainUnwrapped(bool nvSmooth30Loaded, bool switchOn, bool callerIsNvPresent)
 {
     return nvSmooth30Loaded && switchOn && callerIsNvPresent;

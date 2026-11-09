@@ -705,8 +705,10 @@ class Config
     // NVSmooth30 loaded: let the game create its FSR-FG swapchain anyway (default off: refused,
     // FfxSwapchainBlockPolicy.h)
     CustomOptional<bool> SmoothMotionAllowGameFsrFgSwapchain { false };
-    // Test switch: hand NvPresent's swapchain back unwrapped (NVSmooth30Loader::ShouldLeaveSwapchainUnwrapped)
-    CustomOptional<bool> SmoothMotionLeaveSwapchainUnwrapped { false };
+    // Hand NvPresent's swapchain back unwrapped while NVSmooth30 is loaded
+    // (NVSmooth30Loader::ShouldLeaveSwapchainUnwrapped). Default on: NvPresent fails on OptiScaler's wrapper (DLSS
+    // Unlocked #42); it costs OptiScaler's menu on that swapchain.
+    CustomOptional<bool> SmoothMotionLeaveSwapchainUnwrapped { true };
     CustomOptional<bool> SmoothMotionNVSmooth30 {
         true
     }; // Sideload nvsmooth30.dll from OptiScaler directory on RTX 30 (SM86) cards
