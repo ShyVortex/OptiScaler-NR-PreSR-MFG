@@ -469,3 +469,48 @@ This guarantees that extended Windows interfaces (`IDXGISwapChainMedia`) and pro
   suites and `process_exclusion_defaults_unit` still pass. clang-format 23 clean; UTF-8 BOM present.
 - **Expected in game (not yet checked):** after `replaced by a plain swapchain`, no `Release Count: 0` for the wrapper;
   the game draws with no crash; then whether the frame rate doubles.
+
+### 6.13 First-present `E_NOINTERFACE`: NvPresent wraps OptiScaler's wrapper; test switch (`0d8a9dd8`)
+- **Report:** kilyan82, 2026-11-07, preview v0.9.88-pre3 (with `25c99fd1`):
+  - the plain swapchain survives (no `Release Count: 0`), and OptiScaler's menu initialises on the first frame;
+  - the first real `Present` returns `80004002` (`LocalPresent Original present result: 80004002`, 18:42:16.438);
+  - then `EXCEPTION_ACCESS_VIOLATION reading address 0x28` in `D3D12Core`, called from `NvPresent64` (no minidump).
+  - This is johnCXVII's 616.92 symptom (6.2), now on a plain swapchain.
+- **Standalone comparison impossible:** with OptiScaler removed and `nvsmooth30.dll` as `version.dll`, no
+  `nvsmooth30.log` is created: the game doesn't load `version.dll` from its folder.
+- **Offline analysis of `nvpresent64.dll` 621.01** (sha256 `f23546294c601cd5c2274ed855e76c1e63c8f77236b0f494429e99a6a7163ea6`):
+  - NvPresent hands its caller its own `IDXGISwapChain4` proxy (vtable `0x1f2068`, 42 slots). The proxy keeps
+    NvPresent's wrapper at `+0x18`, and the wrapper keeps the inner swapchain at `+0x1588`.
+  - **`QueryInterface` (`0x35da0`):** `IUnknown`, `IDXGIObject`, `IDXGIDeviceSubObject` and the five swapchain IIDs
+    at `0x1f2250` (`IDXGISwapChain` … `IDXGISwapChain4`) are answered by the proxy; every other IID goes to the inner
+    swapchain.
+  - **`Present` (`0x35d80`):** a `DXGI_PRESENT_TEST` call goes to the inner swapchain's `Present`; every other call
+    takes path `0x4a600`, which queues the frame for NvPresent's presenter and always returns `S_OK`.
+  - **`ResizeBuffers` / `ResizeBuffers1` (slots 13 and 39):** `mov rcx,[rcx+0x18]; jmp 0x4a690`. `0x4a690` first
+    locks `+0x15e8`, which explains the pre2 crash (6.12): write to `0x15f0` with `this` = 0 on the freed object.
+  - `E_NOINTERFACE` (`0x80004002`) doesn't occur anywhere in the DLL: NvPresent only passes it on.
+- **The order in the stack:** every NvPresent-attached log shows `WrappedIDXGISwapChain4::QueryInterface Caller:
+  NvPresent64.dll` / `AddRef` right after creation. NvPresent's inner swapchain is therefore OptiScaler's wrapper:
+  - NvPresent's factory hook sits above OptiScaler's;
+  - the chain is game → NvPresent proxy → OptiScaler wrapper → real swapchain;
+  - NvPresent is built to wrap the real swapchain.
+
+  Since NvPresent's `Present` always returns `S_OK`, the logged `E_NOINTERFACE` is most likely the real `Present` that
+  OptiScaler's `LocalPresent` calls when NvPresent's presenter presents through OptiScaler's wrapper. Why the real
+  swapchain refuses that call isn't visible offline.
+- **The test switch (`0d8a9dd8`):**
+  - while NVSmooth30 is loaded, `DxgiFactoryHooks::CreateSwapChain` / `CreateSwapChainForHwnd` log the caller:
+    `NVSmooth30: CreateSwapChainForHwnd called by <module>`;
+  - `[SmoothMotion] LeaveSmoothMotionSwapchainUnwrapped` (default false; `NVSmooth30Loader::ShouldLeaveSwapchainUnwrapped`
+    + `IsNvPresentModule`): a swapchain created by `NvPresent64.dll` through OptiScaler's hook goes back unwrapped
+    through the existing pass-through (`o_CreateSwapChain*` inside `ScopedSkipDxgiLoadChecks` /
+    `ScopedSkipParentWrapping`), logged `left unwrapped for NvPresent`;
+  - with the switch on, that swapchain has no OptiScaler menu, FG, HDR detection or attachment probe. Upscaling through
+    NGX still works, and the key is INI-only.
+- **Test:** `tests/nvsmooth30_unwrapped_swapchain_unit.cpp` (5/5 PASS). The other NVSmooth30 suites, `nr_ini_keys_unit`
+  and `ampere_smooth_motion_unit` still pass. clang-format 23 clean; UTF-8 BOM present.
+- **Expected in game (not yet checked):**
+  - the caller line names `NvPresent64.dll`;
+  - with the switch on: `left unwrapped for NvPresent`, no `LocalPresent … 80004002`, the game draws with no crash;
+  - then whether the frame rate doubles.
+  - If the caller is not `NvPresent64.dll`, the stack order assumed here is wrong and the switch does nothing.
