@@ -16,4 +16,17 @@ constexpr float RightAlignedX(float cursorX, float itemWidth, float contentRight
     const float aligned = contentRightX - itemWidth;
     return aligned > cursorX ? aligned : cursorX;
 }
+
+// Width at which status and error lines wrap, scaled with Menu Scale. Long unwrapped lines (a full DLL path, a loader
+// error naming the GPU) widened their table column, and the two-column table then widened both columns. Wrap at a
+// fixed width, never at the window edge: that would follow the window and keep it wide.
+constexpr float StatusWrapWidth(float menuScale) { return 420.0f * menuScale; }
+
+// Local X at which a section's text wraps: StatusWrapWidth from the section's start, but never past the column's
+// current width (avail), so text can't run into the next column when the column is narrower.
+constexpr float StatusWrapPosX(float cursorX, float avail, float menuScale)
+{
+    const float width = StatusWrapWidth(menuScale);
+    return cursorX + (avail > 0.0f && avail < width ? avail : width);
+}
 } // namespace MenuLayout

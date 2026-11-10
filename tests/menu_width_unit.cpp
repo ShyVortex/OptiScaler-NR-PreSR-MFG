@@ -17,6 +17,10 @@
 // 2. Iterating the old and the new placement over frames: the old one keeps the window width; the new one lets it
 //    fall back to the content width.
 // 3. The footer uses RightAlignedX with the window's IdealMaxPos and no longer GetContentRegionAvail.
+// 4. StatusWrapPosX wraps at StatusWrapWidth (scaled by Menu Scale) from the cursor, or earlier at the column edge.
+// 5. RenderFrameGenerationSelection: no TextWrapped left (it wraps at the column edge); status lines use
+//    StatusTextWrapped, the XeMFG and NVSmooth30 error lines are wrapped by ScopedStatusWrap, and the NVSmooth30 DLL
+//    shows its file name with the full path in a tooltip.
 
 static std::string ReadFile(const char* path)
 {
@@ -91,6 +95,46 @@ int main()
     }
     std::puts("Test 3 PASS: the footer aligns to the content's ideal right edge");
 
-    std::puts("All 3 menu width tests passed.");
+    // Test 4
+    {
+        using MenuLayout::StatusWrapPosX;
+        using MenuLayout::StatusWrapWidth;
+        static_assert(StatusWrapWidth(1.0f) == 420.0f && StatusWrapWidth(0.5f) == 210.0f);
+        static_assert(StatusWrapPosX(10.0f, 900.0f, 1.0f) == 430.0f); // wide column: bounded width
+        static_assert(StatusWrapPosX(10.0f, 900.0f, 0.5f) == 220.0f); // halved with Menu Scale
+        static_assert(StatusWrapPosX(10.0f, 300.0f, 1.0f) == 310.0f); // narrow column: its edge
+        static_assert(StatusWrapPosX(10.0f, 0.0f, 1.0f) == 430.0f);   // no room reported: bounded width
+        static_assert(StatusWrapPosX(10.0f, -5.0f, 1.0f) == 430.0f);
+    }
+    std::puts("Test 4 PASS: status lines wrap at a bounded, scaled width or the narrower column edge");
+
+    // Test 5
+    {
+        const auto menu = Squash(ReadFile("OptiScaler/menu/menu_common.cpp"));
+        const auto start = menu.find("voidMenuCommon::RenderFrameGenerationSelection(RenderMenuContext&ctx){");
+        assert(start != std::string::npos);
+        const auto end = menu.find("voidMenuCommon::", start + 10);
+        assert(end != std::string::npos);
+        const auto fg = menu.substr(start, end - start);
+        assert(fg.find("ImGui::TextWrapped(") == std::string::npos);
+        assert(fg.find("constfloatmenuScale=ctx.menuResScale;") != std::string::npos);
+        assert(fg.find("StatusTextWrapped(menuScale,") != std::string::npos);
+        assert(fg.find("ScopedStatusWrapwrap{menuScale};ImGui::TextColored(toneMapColor(ImVec4(1.f,0.4f,0.4f,1.f)),"
+                       "\"Error:%s\",status.ErrorMessage.c_str());") != std::string::npos);
+        assert(fg.find("ScopedStatusWrapwrap{menuScale};ImGui::TextColored(ImVec4(0.9f,0.2f,0.2f,1.0f),\"%s\","
+                       "nvSmoothStatus.ErrorMessage.c_str());") != std::string::npos);
+        assert(fg.find("ImGui::TextDisabled(\"(%s)\",wstring_to_string(std::filesystem::path(nvSmoothStatus."
+                       "LoadedDllPath).filename().wstring()).c_str());if(ImGui::IsItemHovered())ImGui::SetTooltip("
+                       "\"%s\",wstring_to_string(nvSmoothStatus.LoadedDllPath).c_str());") != std::string::npos);
+
+        const auto helper = menu.find("voidStatusTextWrapped(floatmenuScale,constchar*fmt,...){"
+                                      "ScopedStatusWrapwrap{menuScale};");
+        assert(helper != std::string::npos && helper < start);
+        assert(menu.find("ImGui::PushTextWrapPos(MenuLayout::StatusWrapPosX(ImGui::GetCursorPosX(),"
+                         "ImGui::GetContentRegionAvail().x,menuScale));") != std::string::npos);
+    }
+    std::puts("Test 5 PASS: frame generation status lines wrap at the bounded width; DLL path in a tooltip");
+
+    std::puts("All 5 menu width tests passed.");
     return 0;
 }

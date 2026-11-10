@@ -3212,10 +3212,38 @@ void MenuCommon::RenderActiveUpscalerSettings(RenderMenuContext& ctx)
     }
 }
 
+namespace
+{
+// Pushes a bounded text wrap position (MenuLayout::StatusWrapPosX), measured from where the text starts, and pops it
+// on scope exit. Long status lines wrapped at the column edge or not at all kept the auto-resizing menu wide.
+struct ScopedStatusWrap
+{
+    explicit ScopedStatusWrap(float menuScale)
+    {
+        ImGui::PushTextWrapPos(
+            MenuLayout::StatusWrapPosX(ImGui::GetCursorPosX(), ImGui::GetContentRegionAvail().x, menuScale));
+    }
+    ~ScopedStatusWrap() { ImGui::PopTextWrapPos(); }
+    ScopedStatusWrap(const ScopedStatusWrap&) = delete;
+    ScopedStatusWrap& operator=(const ScopedStatusWrap&) = delete;
+};
+
+// TextWrapped, but wrapping at the bounded status width instead of the column edge.
+void StatusTextWrapped(float menuScale, const char* fmt, ...)
+{
+    ScopedStatusWrap wrap { menuScale };
+    va_list args;
+    va_start(args, fmt);
+    ImGui::TextV(fmt, args);
+    va_end(args);
+}
+} // namespace
+
 void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 {
     auto& state = ctx.state;
     auto config = ctx.config;
+    const float menuScale = ctx.menuResScale;
     auto& primaryGpu = *ctx.primaryGpu;
     bool external = config->ExternalFrameGeneration.value_or_default();
     const bool ampereActive = config->FGDLSSGAmpereMfgUnlock.value_or_default();
@@ -3261,7 +3289,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                        "\nDoes not install an unlocker or enable FG in unsupported games.");
     }
     if (external != state.externalFrameGeneration && !ampereFallbackToFsrFg)
-        ImGui::TextWrapped("Save Settings and restart to change frame-generation ownership.");
+        StatusTextWrapped(menuScale, "Save Settings and restart to change frame-generation ownership.");
 
     auto& menuResScale = ctx.menuResScale;
 
@@ -3326,20 +3354,22 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
         const auto status = MfgUnlock::LastStatus();
         if (adaUnlock != adaEnabledForSession)
-            ImGui::TextWrapped("Save Settings and restart to apply this change.");
+            StatusTextWrapped(menuScale, "Save Settings and restart to apply this change.");
         else if (!status.ModuleFound)
-            ImGui::TextWrapped("Waiting for DLSSG to load.");
+            StatusTextWrapped(menuScale, "Waiting for DLSSG to load.");
         else if (status.AdvertiseMatched && status.ValidateMatched)
         {
             if (status.KernelsRewritten > 0)
-                ImGui::TextWrapped("DLSSG %s: RTX 40 MFG unlock applied with Blackwell kernels (%u containers).",
-                                   status.SnippetVersion.c_str(), status.KernelsRewritten);
+                StatusTextWrapped(menuScale,
+                                  "DLSSG %s: RTX 40 MFG unlock applied with Blackwell kernels (%u containers).",
+                                  status.SnippetVersion.c_str(), status.KernelsRewritten);
             else
-                ImGui::TextWrapped("DLSSG %s: RTX 40 MFG unlock applied (stock Ada kernels).",
-                                   status.SnippetVersion.c_str());
+                StatusTextWrapped(menuScale, "DLSSG %s: RTX 40 MFG unlock applied (stock Ada kernels).",
+                                  status.SnippetVersion.c_str());
         }
         else
-            ImGui::TextWrapped("DLSSG %s: unlock unavailable for this runtime.", status.SnippetVersion.c_str());
+            StatusTextWrapped(menuScale, "DLSSG %s: unlock unavailable for this runtime.",
+                              status.SnippetVersion.c_str());
     }
 #endif
 
@@ -3436,28 +3466,28 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                     : headline == AmpereMfgStatusText::Headline::NotRunning ? ImVec4(1.f, 0.4f, 0.4f, 1.f)
                                                                             : ImVec4(1.f, 0.75f, 0.2f, 1.f);
                 ImGui::PushStyleColor(ImGuiCol_Text, toneMapColor(headlineColor));
-                ImGui::TextWrapped("%s", AmpereMfgStatusText::HeadlineText(status).c_str());
+                StatusTextWrapped(menuScale, "%s", AmpereMfgStatusText::HeadlineText(status).c_str());
                 ImGui::PopStyleColor();
                 const auto details = AmpereMfgStatusText::DetailsText(status, AmpereMfgLoader::ResolveRouter());
                 ShowHelpMarker(details.c_str());
                 if (headline != AmpereMfgStatusText::Headline::NotRunning)
-                    ImGui::TextWrapped("%s", AmpereMfgStatusText::MultiplierText(status));
+                    StatusTextWrapped(menuScale, "%s", AmpereMfgStatusText::MultiplierText(status));
                 if (AmpereMfgStatusText::GameRuntimeRefused(status) && status.ErrorMessage.empty())
                 {
                     ImGui::PushStyleColor(ImGuiCol_Text, toneMapColor(ImVec4(1.f, 0.75f, 0.2f, 1.f)));
-                    ImGui::TextWrapped("%s", AmpereMfgStatusText::GameRuntimeAlternativesText);
+                    StatusTextWrapped(menuScale, "%s", AmpereMfgStatusText::GameRuntimeAlternativesText);
                     ImGui::PopStyleColor();
                 }
                 if (AmpereMfgStatusText::DriverBelowFloor(onLinux, primaryGpu.nvidiaDriverVersion))
                 {
                     ImGui::PushStyleColor(ImGuiCol_Text, toneMapColor(ImVec4(1.f, 0.75f, 0.2f, 1.f)));
-                    ImGui::TextWrapped("%s",
-                                       AmpereMfgStatusText::DriverFloorText(primaryGpu.nvidiaDriverVersion).c_str());
+                    StatusTextWrapped(menuScale, "%s",
+                                      AmpereMfgStatusText::DriverFloorText(primaryGpu.nvidiaDriverVersion).c_str());
                     ImGui::PopStyleColor();
                 }
                 if (GameXeFGHooks::BlockedCount() > 0)
                 {
-                    ImGui::TextWrapped("Game XeSS Frame Generation kept off the swapchain (DLSS-G owns it)");
+                    StatusTextWrapped(menuScale, "Game XeSS Frame Generation kept off the swapchain (DLSS-G owns it)");
                     ShowHelpMarker("The game's own XeSS-FG library can run on GeForce cards (for example after a DLSS "
                                    "Swapper upgrade) and would take the swapchain, leaving DLSS-G without frames.\n"
                                    "OptiScaler answers its context request with 'unsupported device', as the "
@@ -3493,7 +3523,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             // Startup-only mode: hint while the saved config differs from the session (Ada unlock idiom).
             const bool ampereInternalConfigured = config->FGDLSSGAmpereMfgMode.value_or("External") == "Internal";
             if (ampereInternalConfigured != (state.ampereMfgMode == AmpereMfgMode::Internal))
-                ImGui::TextWrapped("Save Settings and restart to apply this change.");
+                StatusTextWrapped(menuScale, "Save Settings and restart to apply this change.");
 
             // Max Multiplier Ceiling slider
             if (dmfgActive)
@@ -3944,6 +3974,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             // Status display
             if (!status.ErrorMessage.empty())
             {
+                ScopedStatusWrap wrap { menuScale };
                 ImGui::TextColored(toneMapColor(ImVec4(1.f, 0.4f, 0.4f, 1.f)), "Error: %s",
                                    status.ErrorMessage.c_str());
             }
@@ -3955,8 +3986,8 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                     status.Applied
                         ? "active (5/5)"
                         : (status.PatchesApplied > 0 ? (std::to_string(status.PatchesApplied) + "/5") : "not applied");
-                ImGui::TextWrapped("DLL: %s | Patches: %s | Pacing: %s", status.ModuleFound ? "found" : "missing",
-                                   patchStr.c_str(), pacingStr.c_str());
+                StatusTextWrapped(menuScale, "DLL: %s | Patches: %s | Pacing: %s",
+                                  status.ModuleFound ? "found" : "missing", patchStr.c_str(), pacingStr.c_str());
             }
 
             if (isVulkan)
@@ -4277,8 +4308,13 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                         "overlay (PresentMon or the NVIDIA App). If it does not double, please report it with\n"
                         "OptiScaler.log and nvsmooth30.log (both next to the game's exe).");
                 }
+                // File name only: the full path (game folder) widened the whole menu; it is in the tooltip.
                 ImGui::SameLine();
-                ImGui::TextDisabled("(%s)", wstring_to_string(nvSmoothStatus.LoadedDllPath).c_str());
+                ImGui::TextDisabled(
+                    "(%s)", wstring_to_string(std::filesystem::path(nvSmoothStatus.LoadedDllPath).filename().wstring())
+                                .c_str());
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", wstring_to_string(nvSmoothStatus.LoadedDllPath).c_str());
             }
             else if (fgConflict)
             {
@@ -4302,6 +4338,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             }
             else if (!nvSmoothStatus.ErrorMessage.empty())
             {
+                ScopedStatusWrap wrap { menuScale };
                 ImGui::TextColored(ImVec4(0.9f, 0.2f, 0.2f, 1.0f), "%s", nvSmoothStatus.ErrorMessage.c_str());
             }
             else
@@ -4315,19 +4352,22 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     if (state.externalFrameGeneration || ampereFallbackToFsrFg || xeActive)
     {
         if (state.externalFrameGeneration)
-            ImGui::TextWrapped("External FG is active. Set the multiplier in the game or unlocker, not OptiScaler.");
+            StatusTextWrapped(menuScale,
+                              "External FG is active. Set the multiplier in the game or unlocker, not OptiScaler.");
         else if (ampereFallbackToFsrFg)
         {
             const std::string fallbackType =
                 AmpereMfgLoader::ResolveFallbackFgType(config->FGDLSSGAmpereMfgLinuxFallbackType.value_or("fsrfg"));
             const char* fallbackTypeName = (fallbackType == "xefg") ? "XeFG" : "FSR FG";
-            ImGui::TextWrapped("Linux FG Fallback is active (%s). Multiplier is controlled via Max Generated Frames "
-                               "above or in-game settings.",
-                               fallbackTypeName);
+            StatusTextWrapped(menuScale,
+                              "Linux FG Fallback is active (%s). Multiplier is controlled via Max Generated Frames "
+                              "above or in-game settings.",
+                              fallbackTypeName);
         }
         else if (xeActive)
         {
-            ImGui::TextWrapped(
+            StatusTextWrapped(
+                menuScale,
                 "Intel XeMFG is active. Multiplier is controlled via the Intel Xe Multi-Frame Generation (XeMFG) "
                 "section above or in-game settings.");
         }
@@ -4613,8 +4653,8 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
         if (!dlssgInputOrOutput && StreamlineHooks::dlssgOptionsPending())
         {
-            ImGui::TextWrapped("DLSSG override pending: waiting for the game's next options update. "
-                               "If it stays pending, toggle frame generation in the game's settings.");
+            StatusTextWrapped(menuScale, "DLSSG override pending: waiting for the game's next options update. "
+                                         "If it stays pending, toggle frame generation in the game's settings.");
         }
 
         ImGui::BeginDisabled(state.dlssgGameDMFGSupported && config->FGDLSSGOverrideForceDMFG.value_or_default());
