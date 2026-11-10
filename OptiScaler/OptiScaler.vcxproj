@@ -616,6 +616,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClInclude Include="menu\menu_viewport.h" />
     <ClInclude Include="menu\MenuLayout.h" />
     <ClInclude Include="menu\ScopedCollapsingHeader.h" />
+    <ClInclude Include="menu\MenuWidthProbe.h" />
     <ClInclude Include="menu\menu_dx11.h" />
     <ClInclude Include="menu\menu_dx12.h" />
     <ClInclude Include="menu\menu_overlay_base.h" />

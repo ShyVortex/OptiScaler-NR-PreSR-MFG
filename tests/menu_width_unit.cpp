@@ -23,8 +23,8 @@
 // 5. RenderFrameGenerationSelection: no TextWrapped left (it wraps at the column edge); status lines use
 //    StatusTextWrapped, the XeMFG and NVSmooth30 error lines are wrapped by ScopedStatusWrap, and the NVSmooth30 DLL
 //    shows its file name with the full path in a tooltip.
-// 6. Width diagnostic: WidestSection names the section that pushed the content furthest right, ExceedsWidth compares
-//    with the display, and the main menu notes every section and logs once per change.
+// 6. Width diagnostic: SectionWidths keeps each section's width and finds the widest, WideStreak reports once after
+//    120 wide frames in a row, and every column section and frame generation block is marked.
 
 static std::string ReadFile(const char* path)
 {
@@ -143,44 +143,65 @@ int main()
 
     // Test 6
     {
-        constexpr auto widest = []
+        constexpr auto sections = []
         {
-            MenuLayout::WidestSection probe;
-            probe.Reset(100.0f);
-            probe.Note("Upscalers", 400.0f);
-            probe.Note("Frame generation selection", 2600.0f);
-            probe.Note("Framerate", 2600.0f); // no wider: keeps the earlier section
-            probe.Note("Keybinds", 900.0f);
-            return probe;
+            MenuLayout::SectionWidths list;
+            list.Add("Upscalers", 400.0f);
+            list.Add("FG: Smooth Motion", 1055.0f);
+            list.Add("Framerate", 1055.0f); // a tie keeps the first
+            list.Add("fakenvapi", 120.0f);
+            return list;
         }();
-        static_assert(widest.right == 2600.0f);
-        static_assert(std::string_view(widest.name) == "Frame generation selection");
-        constexpr auto none = []
+        static_assert(sections.count == 4 && sections.Widest() == 1);
+        static_assert(MenuLayout::SectionWidths {}.Widest() == -1);
+        constexpr auto full = []
         {
-            MenuLayout::WidestSection probe;
-            probe.Reset(500.0f);
-            probe.Note("Upscalers", 300.0f);
-            return probe;
+            MenuLayout::SectionWidths list;
+            for (int i = 0; i < MenuLayout::SectionWidths::Capacity + 5; ++i)
+                list.Add("x", 1.0f);
+            return list.count;
         }();
-        static_assert(none.name == nullptr);
+        static_assert(full == MenuLayout::SectionWidths::Capacity);
+
+        constexpr auto streak = []
+        {
+            MenuLayout::WideStreak s;
+            int reports = 0;
+            for (int i = 0; i < 119; ++i)
+                reports += s.Update(true, 120);
+            const bool before = reports == 0;
+            reports += s.Update(true, 120); // frame 120
+            for (int i = 0; i < 300; ++i)
+                reports += s.Update(true, 120); // once only
+            s.Update(false, 120);               // fits again
+            for (int i = 0; i < 120; ++i)
+                reports += s.Update(true, 120); // a new episode reports again
+            return before && reports == 2;
+        }();
+        static_assert(streak);
         static_assert(MenuLayout::ExceedsWidth(2000.0f, 1920.0f) && !MenuLayout::ExceedsWidth(1920.0f, 1920.0f));
 
         const auto menu = Squash(ReadFile("OptiScaler/menu/menu_common.cpp"));
-        const auto table = menu.substr(menu.find("voidMenuCommon::RenderMainMenuTable(RenderMenuContext&ctx){"), 3000);
-        assert(table.find("RenderFrameGenerationSelection(ctx);NoteMenuSection(\"Framegenerationselection\");") !=
+        const auto table = menu.substr(menu.find("voidMenuCommon::RenderMainMenuTable(RenderMenuContext&ctx){"), 3500);
+        assert(table.find("ImGui::TableNextColumn();BeginMenuColumn(MenuWidthProbe::Columns().left);") !=
+               std::string::npos);
+        assert(table.find("RenderFrameGenerationSelection(ctx);") != std::string::npos);
+        assert(table.find("MarkMenuSection(\"FG:selection\");") != std::string::npos);
+        assert(table.find("ImGui::TableNextColumn();BeginMenuColumn(MenuWidthProbe::Columns().right);") !=
                std::string::npos);
         assert(
-            table.find("DlssNr::RenderMenu(ctx.config,ctx.menuResScale);NoteMenuSection(\"DLSSNeuralRendering\");") !=
+            table.find("RenderKeybindSettings(ctx);MarkMenuSection(\"Keybinds\");EndMenuColumn();ImGui::EndTable();") !=
             std::string::npos);
-        assert(table.find("RenderKeybindSettings(ctx);NoteMenuSection(\"Keybinds\");") != std::string::npos);
-        assert(menu.find("g_menuWidthProbe.widest.Reset(MenuContentRight());") != std::string::npos);
-        assert(menu.find("RenderMainMenuHeaderMessages(ctx);NoteMenuSection(\"Headermessages\");") !=
+        const auto fg =
+            menu.substr(menu.find("voidMenuCommon::RenderFrameGenerationSelection(RenderMenuContext&ctx){"));
+        for (const char* mark :
+             { "FG:ownership", "FG:RTX40unlock", "FG:RTX20/30unlock", "FG:XeMFG", "FG:SmoothMotion" })
+            assert(fg.find(std::string("MarkMenuSection(\"") + mark + "\");") != std::string::npos);
+        assert(menu.find("RenderMainMenuBottomBar(ctx);LogMenuWidthIfWide(menuResScale);") != std::string::npos);
+        assert(menu.find("if(!report.streak.Update(MenuLayout::ExceedsWidth(contentWidth,available),120))return;") !=
                std::string::npos);
-        assert(menu.find("RenderMainMenuBottomBar(ctx);NoteMenuSection(\"Bottombar\");LogMenuWidthIfWide("
-                         "menuResScale);") != std::string::npos);
-        assert(menu.find("if(widest==probe.lastLogged)return;probe.lastLogged=widest;LOG_INFO(") != std::string::npos);
     }
-    std::puts("Test 6 PASS: the width diagnostic names the widest section and logs once per change");
+    std::puts("Test 6 PASS: the width diagnostic measures every section and reports the steady state once");
 
     std::puts("All 6 menu width tests passed.");
     return 0;

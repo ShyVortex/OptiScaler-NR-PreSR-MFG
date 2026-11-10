@@ -1,6 +1,7 @@
 ﻿#include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
 #include <menu/MenuLayout.h>
+#include <menu/MenuWidthProbe.h>
 #include <menu/menu_viewport.h>
 
 #ifndef MENU_HEADER_WIDTH_LEGACY
@@ -30,6 +31,7 @@ class ScopedCollapsingHeader
 #endif
 
 #include <cstdio>
+#include <cstring>
 
 // DLSS Unlocked #42 (kilyan82, 1920x1080, retest on 0ed77d0): the menu still spanned the display. Every collapsible
 // section is a ScopedCollapsingHeader, a child window of width 0 (the column's whole width). EndChild reported that
@@ -50,9 +52,12 @@ class ScopedCollapsingHeader
 // 4. The footer button ends inside the window, also while the content is wider than the display (in 0ed77d0 it was
 //    placed at the content's edge, off-screen).
 // 5. Content inside an open section still widens the menu.
-// With -DMENU_HEADER_WIDTH_LEGACY (the old helper) tests 1 and 2 fail.
+// 6. The width probe (MenuWidthProbe.h) leaves every width unchanged and names the section holding the long line.
+// With -DMENU_HEADER_WIDTH_LEGACY (the old helper) tests 1, 2 and 5 fail, and test 6's width comparison with them.
 
 static int failures = 0;
+static bool g_probe = false;
+static float g_lineWidth = 0.0f;
 
 static void Check(bool passed, const char* name)
 {
@@ -86,6 +91,8 @@ static FrameResult Frame(float scale, bool longLine, bool openWideSection)
         if (ImGui::BeginTable("main", 2, ImGuiTableFlags_SizingStretchSame))
         {
             ImGui::TableNextColumn();
+            if (g_probe)
+                MenuWidthProbe::BeginMenuColumn(MenuWidthProbe::Columns().left);
             ImGui::Text("NVIDIA GeForce RTX 3070 Ti");
             ImGui::Text("D3D12 | DLSS 310.9.16 | Input: DLSS | Spoof: Off");
             {
@@ -94,12 +101,25 @@ static FrameResult Frame(float scale, bool longLine, bool openWideSection)
             {
                 ScopedCollapsingHeader section("RTX 20 / 30 (SM75 / SM86) MFG Unlock");
             }
+            if (g_probe)
+                MenuWidthProbe::MarkMenuSection("Upscalers");
             if (longLine)
                 ImGui::Text("NVSmooth30 Status: Pending Restart (Swapchain not bound) (I:\\SteamLibrary\\steamapps\\"
                             "common\\Wuthering Waves\\Client\\Binaries\\Win64\\OptiScaler\\nvsmooth30.dll)");
+            if (longLine)
+                g_lineWidth = ImGui::GetItemRectSize().x;
+            if (g_probe)
+                MenuWidthProbe::MarkMenuSection("Status");
             ImGui::SliderFloat("FPS Limit", &value, 0.0f, 1.0f);
+            if (g_probe)
+            {
+                MenuWidthProbe::MarkMenuSection("Framerate");
+                MenuWidthProbe::EndMenuColumn();
+            }
 
             ImGui::TableNextColumn();
+            if (g_probe)
+                MenuWidthProbe::BeginMenuColumn(MenuWidthProbe::Columns().right);
             ImGui::SliderFloat("Sharpness", &value, 0.0f, 1.0f);
             ImGui::Text("Output Scaling is ENABLED, Target Res: 2880x1620 (3.00)");
             result.sectionColumnWidth = ImGui::GetContentRegionAvail().x;
@@ -116,6 +136,11 @@ static FrameResult Frame(float scale, bool longLine, bool openWideSection)
             }
             {
                 ScopedCollapsingHeader section("Logging");
+            }
+            if (g_probe)
+            {
+                MenuWidthProbe::MarkMenuSection("Right sections");
+                MenuWidthProbe::EndMenuColumn();
             }
             ImGui::EndTable();
         }
@@ -189,8 +214,35 @@ int main()
     Check(open.width > natural.width + 100.0f, "content inside an open section widens the menu");
     Check(gone.width <= natural.width + 1.0f, "the menu shrinks back once the wide option is gone");
 
+    // Test 6: the probe runs on the same model. Widths are compared with tests 1 (same frames, probe off).
+    {
+        g_probe = true;
+        const auto probedNatural = Run(30, 1.0f, false);
+        const auto probedWidened = Run(30, 1.0f, true);
+        const MenuLayout::SectionWidths left = MenuWidthProbe::Columns().left.sections;
+        const MenuLayout::SectionWidths right = MenuWidthProbe::Columns().right.sections;
+        const auto probedAfter = Run(60, 1.0f, false);
+        g_probe = false;
+
+        for (int i = 0; i < left.count; ++i)
+            std::printf("probe left: %s %.0f px\n", left.names[i], left.widths[i]);
+        for (int i = 0; i < right.count; ++i)
+            std::printf("probe right: %s %.0f px\n", right.names[i], right.widths[i]);
+        std::printf("long line %.0f px\n", g_lineWidth);
+
+        const int widest = left.Widest();
+        Check(probedNatural.width == natural.width && probedWidened.width == widened.width &&
+                  probedAfter.width == after.width,
+              "the probe leaves the menu width unchanged");
+        Check(widest >= 0 && std::strcmp(left.names[widest], "Status") == 0 &&
+                  left.widths[widest] >= g_lineWidth - 1.0f && left.widths[widest] <= g_lineWidth + 1.0f,
+              "the probe names the section with the long line and measures it");
+        Check(left.count == 3 && right.count == 1 && left.widths[0] > 0.0f && right.widths[0] > 0.0f,
+              "both columns are measured");
+    }
+
     ImGui::DestroyContext();
     if (failures == 0)
-        std::puts("All 5 menu section width tests passed.");
+        std::puts("All 6 menu section width tests passed.");
     return failures == 0 ? 0 : 1;
 }

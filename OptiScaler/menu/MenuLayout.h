@@ -34,26 +34,62 @@ constexpr float StatusWrapPosX(float cursorX, float avail, float menuScale)
     return cursorX + (avail > 0.0f && avail < width ? avail : width);
 }
 
-// Diagnostic: remembers which menu section pushed the content furthest right, i.e. the widest one. Note() is called
-// after each section with the content's right edge so far; the last section that moved it is the widest.
-struct WidestSection
+// Diagnostic: the width each section of a menu column reached, measured from the column's start, in order.
+struct SectionWidths
 {
-    const char* name = nullptr;
-    float right = 0.0f;
+    static constexpr int Capacity = 32;
 
-    constexpr void Reset(float startRight)
+    const char* names[Capacity] {};
+    float widths[Capacity] {};
+    int count = 0;
+
+    constexpr void Clear() { count = 0; }
+
+    constexpr void Add(const char* name, float width)
     {
-        name = nullptr;
-        right = startRight;
+        if (count < Capacity)
+        {
+            names[count] = name;
+            widths[count] = width;
+            ++count;
+        }
     }
 
-    constexpr void Note(const char* section, float contentRight)
+    // Index of the widest section, -1 when empty. The first one wins a tie.
+    constexpr int Widest() const
     {
-        if (contentRight > right + 0.5f)
+        int widest = -1;
+        for (int i = 0; i < count; ++i)
         {
-            name = section;
-            right = contentRight;
+            if (widest < 0 || widths[i] > widths[widest])
+                widest = i;
         }
+        return widest;
+    }
+};
+
+// Diagnostic: report once after the menu has been wider than the display for threshold frames in a row (the steady
+// state, not a transient frame), and again only after it has fit the display once.
+struct WideStreak
+{
+    int frames = 0;
+    bool reported = false;
+
+    // True on the frame the report should be written.
+    constexpr bool Update(bool wide, int threshold)
+    {
+        if (!wide)
+        {
+            frames = 0;
+            reported = false;
+            return false;
+        }
+        if (reported)
+            return false;
+        if (++frames < threshold)
+            return false;
+        reported = true;
+        return true;
     }
 };
 

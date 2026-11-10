@@ -38,6 +38,7 @@
 
 #include <imgui/imgui_internal.h>
 #include <menu/MenuLayout.h>
+#include <menu/MenuWidthProbe.h>
 #include <imgui/ImGuiNotify.hpp>
 #include <imgui/imgui_impl_win32.h>
 #include <imgui/imgui_impl_uwp.h>
@@ -3214,6 +3215,63 @@ void MenuCommon::RenderActiveUpscalerSettings(RenderMenuContext& ctx)
 
 namespace
 {
+// Menu width diagnostic: the probe (MenuWidthProbe.h) and its report.
+using MenuWidthProbe::BeginMenuColumn;
+using MenuWidthProbe::ColumnWidthProbe;
+using MenuWidthProbe::EndMenuColumn;
+using MenuWidthProbe::MarkMenuSection;
+using MenuWidthProbe::MenuContentRight;
+
+struct MenuWidthReport
+{
+    float afterHeader = 0.0f;
+    float afterTable = 0.0f;
+    float afterGraphs = 0.0f;
+    MenuLayout::WideStreak streak;
+};
+
+MenuWidthReport g_menuWidthReport;
+
+std::string DescribeColumn(const ColumnWidthProbe& column)
+{
+    std::string text = std::format("visible {:.0f} px:", column.visibleWidth);
+    for (int i = 0; i < column.sections.count; ++i)
+        text += std::format(" {} {:.0f};", column.sections.names[i], column.sections.widths[i]);
+    return text;
+}
+
+// Logs one report once the menu has been wider than the display for 120 frames in a row.
+void LogMenuWidthIfWide(float menuScale)
+{
+    auto& probe = MenuWidthProbe::Columns();
+    auto& report = g_menuWidthReport;
+    const auto* window = ImGui::GetCurrentWindow();
+    const float origin = window->DC.CursorStartPos.x;
+    const float contentWidth = MenuContentRight() - origin;
+    const float available = ImGui::GetMainViewport()->WorkSize.x;
+
+    if (!report.streak.Update(MenuLayout::ExceedsWidth(contentWidth, available), 120))
+        return;
+
+    const auto describeWidest = [](const ColumnWidthProbe& column)
+    {
+        const int widest = column.sections.Widest();
+        return widest < 0 ? std::string("none")
+                          : std::format("{} {:.0f} px", column.sections.names[widest], column.sections.widths[widest]);
+    };
+
+    LOG_INFO("Menu wider than the display for 120 frames: content {:.0f} px, display {:.0f} px, window {:.0f} px, "
+             "Menu Scale {:.2f}. Widest: left {}, right {}. Content after header {:.0f}, table {:.0f}, graphs {:.0f}",
+             contentWidth, available, window->Size.x, menuScale, describeWidest(probe.left),
+             describeWidest(probe.right), report.afterHeader - origin, report.afterTable - origin,
+             report.afterGraphs - origin);
+    LOG_INFO("Menu left column {}", DescribeColumn(probe.left));
+    LOG_INFO("Menu right column {}", DescribeColumn(probe.right));
+}
+} // namespace
+
+namespace
+{
 // Pushes a bounded text wrap position (MenuLayout::StatusWrapPosX), measured from where the text starts, and pops it
 // on scope exit. Long status lines wrapped at the column edge or not at all kept the auto-resizing menu wide.
 struct ScopedStatusWrap
@@ -3292,6 +3350,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         StatusTextWrapped(menuScale, "Save Settings and restart to change frame-generation ownership.");
 
     auto& menuResScale = ctx.menuResScale;
+    MarkMenuSection("FG: ownership");
 
 #if defined(OPTISCALER_RTX40_MFG)
     const bool adaEnabledForSession = MfgUnlock::EnabledForSession();
@@ -3372,6 +3431,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                               status.SnippetVersion.c_str());
     }
 #endif
+    MarkMenuSection("FG: RTX 40 unlock");
 
     // ── Ampere/Turing (SM86/SM75) MFG Unlock ─────────────────────────
     if (ImGui::CollapsingHeader("RTX 20 / 30 (SM75 / SM86) MFG Unlock"))
@@ -3806,6 +3866,8 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         ImGui::Unindent();
     }
 
+    MarkMenuSection("FG: RTX 20/30 unlock");
+
     // ── Intel Xe Multi-Frame Generation (XeMFG) Unlock ──────────────
     if (ImGui::CollapsingHeader("Intel Xe Multi-Frame Generation (XeMFG)"))
     {
@@ -4141,6 +4203,8 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         ImGui::Unindent();
     }
 
+    MarkMenuSection("FG: XeMFG");
+
     // ── NVIDIA Smooth Motion (Driver-level Frame Interpolation) ─────
     ImGui::Separator();
     bool smoothMotion = config->FGDLSSGSmoothMotion.value_or(false);
@@ -4348,6 +4412,8 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             ImGui::Unindent();
         }
     }
+
+    MarkMenuSection("FG: Smooth Motion");
 
     if (state.externalFrameGeneration || ampereFallbackToFsrFg || xeActive)
     {
@@ -8420,112 +8486,60 @@ void MenuCommon::RenderKeybindSettings(RenderMenuContext& ctx)
     }
 }
 
-namespace
-{
-// Menu width diagnostic (DLSS Unlocked #42, FG-MENU-WIDTH-RATCHET.md): which section asked for the most width, and
-// how wide each column's content was, in the current frame.
-struct MenuWidthProbe
-{
-    MenuLayout::WidestSection widest;
-    float leftStart = 0.0f;
-    float leftRight = 0.0f;
-    float rightStart = 0.0f;
-    float rightRight = 0.0f;
-    std::string lastLogged;
-};
-
-MenuWidthProbe g_menuWidthProbe;
-
-// The right edge the current window's content asked for so far (what auto-resize uses).
-float MenuContentRight()
-{
-    const auto* window = ImGui::GetCurrentWindow();
-    return ImMax(window->DC.CursorMaxPos.x, window->DC.IdealMaxPos.x);
-}
-
-void NoteMenuSection(const char* section) { g_menuWidthProbe.widest.Note(section, MenuContentRight()); }
-
-// Logs once per change when the menu's content is wider than the display, naming the widest section.
-void LogMenuWidthIfWide(float menuScale)
-{
-    auto& probe = g_menuWidthProbe;
-    const auto* window = ImGui::GetCurrentWindow();
-    const float contentWidth = MenuContentRight() - window->DC.CursorStartPos.x;
-    const float available = ImGui::GetMainViewport()->WorkSize.x;
-
-    if (!MenuLayout::ExceedsWidth(contentWidth, available))
-    {
-        probe.lastLogged.clear();
-        return;
-    }
-
-    const std::string widest = probe.widest.name != nullptr ? probe.widest.name : "unknown";
-    if (widest == probe.lastLogged)
-        return;
-
-    probe.lastLogged = widest;
-    LOG_INFO("Menu content is {:.0f} px wide, the display {:.0f} px (Menu Scale {:.2f}). Widest section: {}. "
-             "Left column {:.0f} px, right column {:.0f} px",
-             contentWidth, available, menuScale, widest, probe.leftRight - probe.leftStart,
-             probe.rightRight - probe.rightStart);
-}
-} // namespace
-
 void MenuCommon::RenderMainMenuTable(RenderMenuContext& ctx)
 {
     if (ImGui::BeginTable("main", 2, ImGuiTableFlags_SizingStretchSame))
     {
-        auto& probe = g_menuWidthProbe;
         ImGui::TableNextColumn();
-        probe.leftStart = ImGui::GetCursorScreenPos().x;
+        BeginMenuColumn(MenuWidthProbe::Columns().left);
 
         // Left column: active upscaler state, frame generation, FSR common, latency and fakenvapi controls.
         RenderActiveUpscalerSettings(ctx);
-        NoteMenuSection("Upscalers");
-        RenderFrameGenerationSelection(ctx);
-        NoteMenuSection("Frame generation selection");
+        MarkMenuSection("Upscalers");
+        RenderFrameGenerationSelection(ctx); // marks its own blocks ("FG: ...")
+        MarkMenuSection("FG: selection");
         RenderFrameGenerationRuntimeSettings(ctx);
-        NoteMenuSection("Frame generation settings");
+        MarkMenuSection("Frame generation settings");
         RenderFsrCommonSettings(ctx);
-        NoteMenuSection("FSR common");
+        MarkMenuSection("FSR common");
         RenderFramerateSettings(ctx);
-        NoteMenuSection("Framerate");
+        MarkMenuSection("Framerate");
 #ifdef LOW_LATENCY_INPUTS
         RenderLowLatencySettings(ctx);
-        NoteMenuSection("Low latency");
+        MarkMenuSection("Low latency");
 #else
         RenderFakenvapiSettings(ctx);
-        NoteMenuSection("fakenvapi");
+        MarkMenuSection("fakenvapi");
 #endif
-        probe.leftRight = MenuContentRight();
+        EndMenuColumn();
 
         ImGui::TableNextColumn();
-        probe.rightStart = ImGui::GetCursorScreenPos().x;
+        BeginMenuColumn(MenuWidthProbe::Columns().right);
 
         // Right column: image quality, initialization, advanced options, appearance, overlay and input settings.
         RenderActiveImageSettings(ctx);
-        NoteMenuSection("Image settings");
+        MarkMenuSection("Image settings");
         DlssNr::RenderMenu(ctx.config, ctx.menuResScale);
-        NoteMenuSection("DLSS Neural Rendering");
+        MarkMenuSection("DLSS Neural Rendering");
         RenderMagnifierSettings(ctx);
-        NoteMenuSection("Magnifier");
+        MarkMenuSection("Magnifier");
         RenderQuirksSettings(ctx);
-        NoteMenuSection("Active Quirks");
+        MarkMenuSection("Active Quirks");
         RenderAdvancedSettings(ctx);
-        NoteMenuSection("Advanced Settings");
+        MarkMenuSection("Advanced Settings");
         RenderLoggingSettings(ctx);
-        NoteMenuSection("Logging");
+        MarkMenuSection("Logging");
         RenderThemeSettings(ctx);
-        NoteMenuSection("Menu Theme and Color");
+        MarkMenuSection("Menu Theme and Color");
         RenderFpsOverlaySettings(ctx);
-        NoteMenuSection("FPS Overlay");
+        MarkMenuSection("FPS Overlay");
         RenderUpscalerInputsSettings(ctx);
-        NoteMenuSection("Upscaler Inputs");
+        MarkMenuSection("Upscaler Inputs");
         RenderApiAndTextureSettings(ctx);
-        NoteMenuSection("API and texture settings");
+        MarkMenuSection("API and texture settings");
         RenderKeybindSettings(ctx);
-        NoteMenuSection("Keybinds");
-        probe.rightRight = MenuContentRight();
+        MarkMenuSection("Keybinds");
+        EndMenuColumn();
 
         ImGui::EndTable();
     }
@@ -9094,20 +9108,18 @@ void MenuCommon::RenderMainMenuWindow(RenderMenuContext& ctx)
     MenuViewport::ConstrainWindow(windowTitle.c_str());
     if (ImGui::Begin(windowTitle.c_str(), NULL, flags))
     {
-        g_menuWidthProbe.widest.Reset(MenuContentRight());
-
         // Header/status messages shown above the two-column settings table.
         RenderMainMenuHeaderMessages(ctx);
-        NoteMenuSection("Header messages");
+        g_menuWidthReport.afterHeader = MenuContentRight();
 
         // Main two-column settings content.
         RenderMainMenuTable(ctx);
+        g_menuWidthReport.afterTable = MenuContentRight();
 
         // Diagnostics and footer actions below the settings table.
         RenderMainMenuGraphs(ctx);
-        NoteMenuSection("Graphs");
+        g_menuWidthReport.afterGraphs = MenuContentRight();
         RenderMainMenuBottomBar(ctx);
-        NoteMenuSection("Bottom bar");
 
         LogMenuWidthIfWide(menuResScale);
 
