@@ -11,9 +11,13 @@ namespace MenuLayout
 // X for an item of itemWidth that should end at the content's own right edge (contentRightX: the widest point the
 // rest of the content reached, not the window edge). If the cursor is already past that point, the item simply
 // follows the cursor, so it never pushes the content further right than it would go anyway.
-constexpr float RightAlignedX(float cursorX, float itemWidth, float contentRightX)
+// visibleRightX is the window's visible right edge: when the content is wider than the window (the window is clamped
+// to the display), the item ends there instead of off-screen. That never holds the width: it only applies while the
+// content is already wider than the window.
+constexpr float RightAlignedX(float cursorX, float itemWidth, float contentRightX, float visibleRightX)
 {
-    const float aligned = contentRightX - itemWidth;
+    const float right = contentRightX < visibleRightX ? contentRightX : visibleRightX;
+    const float aligned = right - itemWidth;
     return aligned > cursorX ? aligned : cursorX;
 }
 

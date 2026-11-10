@@ -8651,8 +8651,10 @@ void MenuCommon::RenderMainMenuBottomBar(RenderMenuContext& ctx)
     // Right-align to the content's own right edge, never the window's: aligning to the window edge kept the
     // auto-resizing menu from ever shrinking (MenuLayout.h).
     const auto cursor = ImGui::GetCursorScreenPos();
-    const float contentRight = ImGui::GetCurrentWindow()->DC.IdealMaxPos.x;
-    ImGui::SetCursorScreenPos({ MenuLayout::RightAlignedX(cursor.x, textSize.x, contentRight), cursor.y });
+    const auto* window = ImGui::GetCurrentWindow();
+    ImGui::SetCursorScreenPos(
+        { MenuLayout::RightAlignedX(cursor.x, textSize.x, window->DC.IdealMaxPos.x, window->WorkRect.Max.x),
+          cursor.y });
 
     // Make button text underline
     if (ImGui::Button("Open Wiki"))

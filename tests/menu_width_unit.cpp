@@ -13,10 +13,11 @@
 // shrink (FG-MENU-WIDTH-RATCHET.md).
 //
 // Validates:
-// 1. RightAlignedX ends the item at the content's right edge, or follows the cursor when that is further right.
+// 1. RightAlignedX ends the item at the content's right edge, or follows the cursor when that is further right; when
+//    the content is wider than the window (clamped to the display), it ends at the window's visible edge.
 // 2. Iterating the old and the new placement over frames: the old one keeps the window width; the new one lets it
 //    fall back to the content width.
-// 3. The footer uses RightAlignedX with the window's IdealMaxPos and no longer GetContentRegionAvail.
+// 3. The footer uses RightAlignedX with the window's IdealMaxPos and WorkRect, and no longer GetContentRegionAvail.
 // 4. StatusWrapPosX wraps at StatusWrapWidth (scaled by Menu Scale) from the cursor, or earlier at the column edge.
 // 5. RenderFrameGenerationSelection: no TextWrapped left (it wraps at the column edge); status lines use
 //    StatusTextWrapped, the XeMFG and NVSmooth30 error lines are wrapped by ScopedStatusWrap, and the NVSmooth30 DLL
@@ -49,10 +50,12 @@ int main()
     using MenuLayout::RightAlignedX;
 
     // Test 1
-    static_assert(RightAlignedX(100.0f, 50.0f, 400.0f) == 350.0f);
-    static_assert(RightAlignedX(380.0f, 50.0f, 400.0f) == 380.0f);
-    static_assert(RightAlignedX(100.0f, 50.0f, 150.0f) == 100.0f);
-    std::puts("Test 1 PASS: the item ends at the content's right edge, or follows the cursor");
+    static_assert(RightAlignedX(100.0f, 50.0f, 400.0f, 1000.0f) == 350.0f);
+    static_assert(RightAlignedX(380.0f, 50.0f, 400.0f, 1000.0f) == 380.0f);
+    static_assert(RightAlignedX(100.0f, 50.0f, 150.0f, 1000.0f) == 100.0f);
+    static_assert(RightAlignedX(100.0f, 50.0f, 2800.0f, 1880.0f) == 1830.0f); // content wider than the window
+    static_assert(RightAlignedX(1850.0f, 50.0f, 2800.0f, 1880.0f) == 1850.0f);
+    std::puts("Test 1 PASS: the item ends at the content's right edge (at most the window's), or follows the cursor");
 
     // Test 2: a window that was widened to 1900 by a line that is gone now; the rest of the content is 900 wide,
     // the footer's other items end at x = 300 and the button is 80 wide.
@@ -73,7 +76,7 @@ int main()
         float newWidth = 1900.0f;
         for (int frame = 0; frame < 10; frame++)
         {
-            const float buttonRight = RightAlignedX(footerCursor, button, content) + button;
+            const float buttonRight = RightAlignedX(footerCursor, button, content, newWidth) + button;
             newWidth = content > buttonRight ? content : buttonRight;
         }
         assert(newWidth == content);
@@ -88,9 +91,9 @@ int main()
         const auto end = menu.find("ImGui::Button(\"OpenWiki\")", start);
         assert(end != std::string::npos);
         const auto footer = menu.substr(start, end - start);
-        assert(footer.find("constfloatcontentRight=ImGui::GetCurrentWindow()->DC.IdealMaxPos.x;") != std::string::npos);
-        assert(footer.find("ImGui::SetCursorScreenPos({MenuLayout::RightAlignedX(cursor.x,textSize.x,contentRight),"
-                           "cursor.y});") != std::string::npos);
+        assert(footer.find("constauto*window=ImGui::GetCurrentWindow();") != std::string::npos);
+        assert(footer.find("ImGui::SetCursorScreenPos({MenuLayout::RightAlignedX(cursor.x,textSize.x,window->DC."
+                           "IdealMaxPos.x,window->WorkRect.Max.x),cursor.y});") != std::string::npos);
         assert(footer.find("GetContentRegionAvail") == std::string::npos);
     }
     std::puts("Test 3 PASS: the footer aligns to the content's ideal right edge");

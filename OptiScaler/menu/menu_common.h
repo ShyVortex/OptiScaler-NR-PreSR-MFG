@@ -4,6 +4,7 @@
 #include <Config.h>
 
 #include <imgui/imgui.h>
+#include <menu/ScopedCollapsingHeader.h>
 
 class ScopedIndent
 {
@@ -14,36 +15,6 @@ class ScopedIndent
 
   private:
     float m_indent;
-};
-
-class ScopedCollapsingHeader
-{
-  public:
-    explicit ScopedCollapsingHeader(const char* label, ImGuiTreeNodeFlags flags = 0)
-    {
-        ImGui::PushID(label);
-
-        ImGui::BeginChild("##CollapsingHeaderChild", ImVec2(0, 0), ImGuiChildFlags_AutoResizeY,
-                          ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-
-        _headerOpen = ImGui::CollapsingHeader(label, flags);
-        _active = true;
-    }
-
-    bool IsHeaderOpen() const { return _headerOpen; }
-
-    ~ScopedCollapsingHeader()
-    {
-        if (_active)
-        {
-            ImGui::EndChild();
-            ImGui::PopID();
-        }
-    }
-
-  private:
-    bool _active = false;
-    bool _headerOpen = false;
 };
 
 template <typename T> struct MenuOption
