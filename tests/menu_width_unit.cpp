@@ -6,6 +6,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <string_view>
 
 // DLSS Unlocked #42 (kilyan82, 1920x1080): the main menu stayed full width even at Menu Scale 0.5. The window is
 // auto-resizing; the footer's "Open Wiki" button was right-aligned to the window's current right edge
@@ -22,6 +23,8 @@
 // 5. RenderFrameGenerationSelection: no TextWrapped left (it wraps at the column edge); status lines use
 //    StatusTextWrapped, the XeMFG and NVSmooth30 error lines are wrapped by ScopedStatusWrap, and the NVSmooth30 DLL
 //    shows its file name with the full path in a tooltip.
+// 6. Width diagnostic: WidestSection names the section that pushed the content furthest right, ExceedsWidth compares
+//    with the display, and the main menu notes every section and logs once per change.
 
 static std::string ReadFile(const char* path)
 {
@@ -138,6 +141,47 @@ int main()
     }
     std::puts("Test 5 PASS: frame generation status lines wrap at the bounded width; DLL path in a tooltip");
 
-    std::puts("All 5 menu width tests passed.");
+    // Test 6
+    {
+        constexpr auto widest = []
+        {
+            MenuLayout::WidestSection probe;
+            probe.Reset(100.0f);
+            probe.Note("Upscalers", 400.0f);
+            probe.Note("Frame generation selection", 2600.0f);
+            probe.Note("Framerate", 2600.0f); // no wider: keeps the earlier section
+            probe.Note("Keybinds", 900.0f);
+            return probe;
+        }();
+        static_assert(widest.right == 2600.0f);
+        static_assert(std::string_view(widest.name) == "Frame generation selection");
+        constexpr auto none = []
+        {
+            MenuLayout::WidestSection probe;
+            probe.Reset(500.0f);
+            probe.Note("Upscalers", 300.0f);
+            return probe;
+        }();
+        static_assert(none.name == nullptr);
+        static_assert(MenuLayout::ExceedsWidth(2000.0f, 1920.0f) && !MenuLayout::ExceedsWidth(1920.0f, 1920.0f));
+
+        const auto menu = Squash(ReadFile("OptiScaler/menu/menu_common.cpp"));
+        const auto table = menu.substr(menu.find("voidMenuCommon::RenderMainMenuTable(RenderMenuContext&ctx){"), 3000);
+        assert(table.find("RenderFrameGenerationSelection(ctx);NoteMenuSection(\"Framegenerationselection\");") !=
+               std::string::npos);
+        assert(
+            table.find("DlssNr::RenderMenu(ctx.config,ctx.menuResScale);NoteMenuSection(\"DLSSNeuralRendering\");") !=
+            std::string::npos);
+        assert(table.find("RenderKeybindSettings(ctx);NoteMenuSection(\"Keybinds\");") != std::string::npos);
+        assert(menu.find("g_menuWidthProbe.widest.Reset(MenuContentRight());") != std::string::npos);
+        assert(menu.find("RenderMainMenuHeaderMessages(ctx);NoteMenuSection(\"Headermessages\");") !=
+               std::string::npos);
+        assert(menu.find("RenderMainMenuBottomBar(ctx);NoteMenuSection(\"Bottombar\");LogMenuWidthIfWide("
+                         "menuResScale);") != std::string::npos);
+        assert(menu.find("if(widest==probe.lastLogged)return;probe.lastLogged=widest;LOG_INFO(") != std::string::npos);
+    }
+    std::puts("Test 6 PASS: the width diagnostic names the widest section and logs once per change");
+
+    std::puts("All 6 menu width tests passed.");
     return 0;
 }

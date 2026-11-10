@@ -8420,38 +8420,112 @@ void MenuCommon::RenderKeybindSettings(RenderMenuContext& ctx)
     }
 }
 
+namespace
+{
+// Menu width diagnostic (DLSS Unlocked #42, FG-MENU-WIDTH-RATCHET.md): which section asked for the most width, and
+// how wide each column's content was, in the current frame.
+struct MenuWidthProbe
+{
+    MenuLayout::WidestSection widest;
+    float leftStart = 0.0f;
+    float leftRight = 0.0f;
+    float rightStart = 0.0f;
+    float rightRight = 0.0f;
+    std::string lastLogged;
+};
+
+MenuWidthProbe g_menuWidthProbe;
+
+// The right edge the current window's content asked for so far (what auto-resize uses).
+float MenuContentRight()
+{
+    const auto* window = ImGui::GetCurrentWindow();
+    return ImMax(window->DC.CursorMaxPos.x, window->DC.IdealMaxPos.x);
+}
+
+void NoteMenuSection(const char* section) { g_menuWidthProbe.widest.Note(section, MenuContentRight()); }
+
+// Logs once per change when the menu's content is wider than the display, naming the widest section.
+void LogMenuWidthIfWide(float menuScale)
+{
+    auto& probe = g_menuWidthProbe;
+    const auto* window = ImGui::GetCurrentWindow();
+    const float contentWidth = MenuContentRight() - window->DC.CursorStartPos.x;
+    const float available = ImGui::GetMainViewport()->WorkSize.x;
+
+    if (!MenuLayout::ExceedsWidth(contentWidth, available))
+    {
+        probe.lastLogged.clear();
+        return;
+    }
+
+    const std::string widest = probe.widest.name != nullptr ? probe.widest.name : "unknown";
+    if (widest == probe.lastLogged)
+        return;
+
+    probe.lastLogged = widest;
+    LOG_INFO("Menu content is {:.0f} px wide, the display {:.0f} px (Menu Scale {:.2f}). Widest section: {}. "
+             "Left column {:.0f} px, right column {:.0f} px",
+             contentWidth, available, menuScale, widest, probe.leftRight - probe.leftStart,
+             probe.rightRight - probe.rightStart);
+}
+} // namespace
+
 void MenuCommon::RenderMainMenuTable(RenderMenuContext& ctx)
 {
     if (ImGui::BeginTable("main", 2, ImGuiTableFlags_SizingStretchSame))
     {
+        auto& probe = g_menuWidthProbe;
         ImGui::TableNextColumn();
+        probe.leftStart = ImGui::GetCursorScreenPos().x;
 
         // Left column: active upscaler state, frame generation, FSR common, latency and fakenvapi controls.
         RenderActiveUpscalerSettings(ctx);
+        NoteMenuSection("Upscalers");
         RenderFrameGenerationSelection(ctx);
+        NoteMenuSection("Frame generation selection");
         RenderFrameGenerationRuntimeSettings(ctx);
+        NoteMenuSection("Frame generation settings");
         RenderFsrCommonSettings(ctx);
+        NoteMenuSection("FSR common");
         RenderFramerateSettings(ctx);
+        NoteMenuSection("Framerate");
 #ifdef LOW_LATENCY_INPUTS
         RenderLowLatencySettings(ctx);
+        NoteMenuSection("Low latency");
 #else
         RenderFakenvapiSettings(ctx);
+        NoteMenuSection("fakenvapi");
 #endif
+        probe.leftRight = MenuContentRight();
 
         ImGui::TableNextColumn();
+        probe.rightStart = ImGui::GetCursorScreenPos().x;
 
         // Right column: image quality, initialization, advanced options, appearance, overlay and input settings.
         RenderActiveImageSettings(ctx);
+        NoteMenuSection("Image settings");
         DlssNr::RenderMenu(ctx.config, ctx.menuResScale);
+        NoteMenuSection("DLSS Neural Rendering");
         RenderMagnifierSettings(ctx);
+        NoteMenuSection("Magnifier");
         RenderQuirksSettings(ctx);
+        NoteMenuSection("Active Quirks");
         RenderAdvancedSettings(ctx);
+        NoteMenuSection("Advanced Settings");
         RenderLoggingSettings(ctx);
+        NoteMenuSection("Logging");
         RenderThemeSettings(ctx);
+        NoteMenuSection("Menu Theme and Color");
         RenderFpsOverlaySettings(ctx);
+        NoteMenuSection("FPS Overlay");
         RenderUpscalerInputsSettings(ctx);
+        NoteMenuSection("Upscaler Inputs");
         RenderApiAndTextureSettings(ctx);
+        NoteMenuSection("API and texture settings");
         RenderKeybindSettings(ctx);
+        NoteMenuSection("Keybinds");
+        probe.rightRight = MenuContentRight();
 
         ImGui::EndTable();
     }
@@ -9020,15 +9094,22 @@ void MenuCommon::RenderMainMenuWindow(RenderMenuContext& ctx)
     MenuViewport::ConstrainWindow(windowTitle.c_str());
     if (ImGui::Begin(windowTitle.c_str(), NULL, flags))
     {
+        g_menuWidthProbe.widest.Reset(MenuContentRight());
+
         // Header/status messages shown above the two-column settings table.
         RenderMainMenuHeaderMessages(ctx);
+        NoteMenuSection("Header messages");
 
         // Main two-column settings content.
         RenderMainMenuTable(ctx);
 
         // Diagnostics and footer actions below the settings table.
         RenderMainMenuGraphs(ctx);
+        NoteMenuSection("Graphs");
         RenderMainMenuBottomBar(ctx);
+        NoteMenuSection("Bottom bar");
+
+        LogMenuWidthIfWide(menuResScale);
 
         ImGui::End();
     }

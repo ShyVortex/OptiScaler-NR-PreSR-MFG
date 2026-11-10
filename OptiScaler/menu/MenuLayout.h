@@ -33,4 +33,30 @@ constexpr float StatusWrapPosX(float cursorX, float avail, float menuScale)
     const float width = StatusWrapWidth(menuScale);
     return cursorX + (avail > 0.0f && avail < width ? avail : width);
 }
+
+// Diagnostic: remembers which menu section pushed the content furthest right, i.e. the widest one. Note() is called
+// after each section with the content's right edge so far; the last section that moved it is the widest.
+struct WidestSection
+{
+    const char* name = nullptr;
+    float right = 0.0f;
+
+    constexpr void Reset(float startRight)
+    {
+        name = nullptr;
+        right = startRight;
+    }
+
+    constexpr void Note(const char* section, float contentRight)
+    {
+        if (contentRight > right + 0.5f)
+        {
+            name = section;
+            right = contentRight;
+        }
+    }
+};
+
+// True when the menu's content asks for more width than the display can give it (the window is then clamped).
+constexpr bool ExceedsWidth(float contentWidth, float availableWidth) { return contentWidth > availableWidth + 0.5f; }
 } // namespace MenuLayout
