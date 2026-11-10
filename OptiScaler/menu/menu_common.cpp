@@ -37,6 +37,7 @@
 #include <upscaler_time/UpscalerTime_Vk.h>
 
 #include <imgui/imgui_internal.h>
+#include <menu/MenuLayout.h>
 #include <imgui/ImGuiNotify.hpp>
 #include <imgui/imgui_impl_win32.h>
 #include <imgui/imgui_impl_uwp.h>
@@ -8607,8 +8608,11 @@ void MenuCommon::RenderMainMenuBottomBar(RenderMenuContext& ctx)
     textSize.x += style.FramePadding.x * 2.0f;
     textSize.x += style.ItemSpacing.x;
 
-    float avail = ImGui::GetContentRegionAvail().x;
-    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + avail - textSize.x);
+    // Right-align to the content's own right edge, never the window's: aligning to the window edge kept the
+    // auto-resizing menu from ever shrinking (MenuLayout.h).
+    const auto cursor = ImGui::GetCursorScreenPos();
+    const float contentRight = ImGui::GetCurrentWindow()->DC.IdealMaxPos.x;
+    ImGui::SetCursorScreenPos({ MenuLayout::RightAlignedX(cursor.x, textSize.x, contentRight), cursor.y });
 
     // Make button text underline
     if (ImGui::Button("Open Wiki"))
