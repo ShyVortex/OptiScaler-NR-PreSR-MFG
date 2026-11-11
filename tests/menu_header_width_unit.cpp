@@ -53,10 +53,14 @@ class ScopedCollapsingHeader
 //    placed at the content's edge, off-screen).
 // 5. Content inside an open section still widens the menu.
 // 6. The width probe (MenuWidthProbe.h) leaves every width unchanged and names the section holding the long line.
+// 7. The DMFG checkbox placed with SameLine after the FG selection table (games without DLSS-G before round 3) sits
+//    past the column edge and widens the menu; without it the menu keeps its natural width.
 // With -DMENU_HEADER_WIDTH_LEGACY (the old helper) tests 1, 2 and 5 fail, and test 6's width comparison with them.
 
 static int failures = 0;
 static bool g_probe = false;
+static bool g_fgSelection = false;
+static bool g_dmfgAfterTable = false;
 static float g_lineWidth = 0.0f;
 
 static void Check(bool passed, const char* name)
@@ -64,6 +68,14 @@ static void Check(bool passed, const char* name)
     std::printf("%s: %s\n", passed ? "PASS" : "FAIL", name);
     if (!passed)
         ++failures;
+}
+
+static float SectionWidth(const MenuLayout::SectionWidths& sections, const char* name)
+{
+    for (int i = 0; i < sections.count; ++i)
+        if (std::strcmp(sections.names[i], name) == 0)
+            return sections.widths[i];
+    return -1.0f;
 }
 
 struct FrameResult
@@ -110,6 +122,31 @@ static FrameResult Frame(float scale, bool longLine, bool openWideSection)
                 g_lineWidth = ImGui::GetItemRectSize().x;
             if (g_probe)
                 MenuWidthProbe::MarkMenuSection("Status");
+            if (g_fgSelection)
+            {
+                // The FG Input / Output table, then (before the fix, in games without DLSS-G) the DMFG checkbox with
+                // SameLine after it: the table's line ends at the column edge.
+                ImGui::SeparatorText("Frame Generation");
+                if (ImGui::BeginTable("fgSelection", 2, ImGuiTableFlags_SizingStretchSame))
+                {
+                    static int selected = 0;
+                    ImGui::TableNextColumn();
+                    ImGui::Combo("FG Input", &selected, "None\0Nukems\0");
+                    ImGui::TableNextColumn();
+                    ImGui::Combo("FG Output", &selected, "None\0XeFG\0");
+                    ImGui::EndTable();
+                }
+                if (g_dmfgAfterTable)
+                {
+                    static bool dynamicMfg = false;
+                    ImGui::SameLine(0.0f, 16.0f);
+                    ImGui::Checkbox("Force Dynamic MFG", &dynamicMfg);
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("(?)");
+                }
+                if (g_probe)
+                    MenuWidthProbe::MarkMenuSection("FG: selection");
+            }
             ImGui::SliderFloat("FPS Limit", &value, 0.0f, 1.0f);
             if (g_probe)
             {
@@ -241,8 +278,32 @@ int main()
               "both columns are measured");
     }
 
+    // Test 7: the DMFG checkbox placed after the FG selection table (round 3).
+    {
+        g_fgSelection = true;
+        g_probe = true;
+        const auto withTable = Run(60, 1.0f, false);
+        const float tableOnly = SectionWidth(MenuWidthProbe::Columns().left.sections, "FG: selection");
+        g_dmfgAfterTable = true;
+        const auto oldPlacement = Run(60, 1.0f, false);
+        const auto& left = MenuWidthProbe::Columns().left;
+        const float oldSection = SectionWidth(left.sections, "FG: selection");
+        const float oldVisible = left.visibleWidth;
+        g_dmfgAfterTable = false;
+        const auto fixed = Run(60, 1.0f, false);
+        g_probe = false;
+        g_fgSelection = false;
+        std::printf("FG selection: table only %.0f px, menu %.0f; checkbox after the table: section %.0f px in a "
+                    "%.0f px column, menu %.0f; without it: menu %.0f\n",
+                    tableOnly, withTable.width, oldSection, oldVisible, oldPlacement.width, fixed.width);
+        Check(oldSection > oldVisible + 100.0f && oldPlacement.width > withTable.width + 500.0f,
+              "the old placement puts the checkbox past the column edge and widens the menu");
+        Check(tableOnly > 0.0f && tableOnly < oldVisible && fixed.width == withTable.width && fixed.width < 1300.0f,
+              "without the checkbox after the table, the menu keeps its natural width");
+    }
+
     ImGui::DestroyContext();
     if (failures == 0)
-        std::puts("All 6 menu section width tests passed.");
+        std::puts("All 7 menu section width tests passed.");
     return failures == 0 ? 0 : 1;
 }

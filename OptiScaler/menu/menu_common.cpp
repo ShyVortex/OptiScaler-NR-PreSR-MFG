@@ -4723,8 +4723,14 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                                          "If it stays pending, toggle frame generation in the game's settings.");
         }
 
+        // The ratio combo and the DMFG controls share one line, and only when the game's DLSS-G is known
+        // (MenuLayout.h). Placed with SameLine after the FG selection table, the DMFG checkbox sat past the column
+        // edge: invisible, yet it widened the whole menu (DLSS Unlocked #42, FG-MENU-WIDTH-RATCHET.md round 3).
+        const bool ratioComboShown = MenuLayout::ShowsDlssgRatioCombo(
+            state.dlssgMfgMax.has_value(), state.dlssgMfgMax.value_or(0), dlssgInputOrOutput);
+
         ImGui::BeginDisabled(state.dlssgGameDMFGSupported && config->FGDLSSGOverrideForceDMFG.value_or_default());
-        if (state.dlssgMfgMax.has_value() && state.dlssgMfgMax.value() >= 1 && !dlssgInputOrOutput)
+        if (ratioComboShown)
         {
             auto maxInterpolationCount = state.dlssgMfgMax.value();
 
@@ -4804,9 +4810,10 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
         ImGui::EndDisabled();
 
-        if (!dlssgInputOrOutput)
+        if (MenuLayout::ShowsDlssgDmfgControls(state.dlssgMfgMax.has_value(), dlssgInputOrOutput))
         {
-            ImGui::SameLine(0.0f, 16.0f);
+            if (ratioComboShown)
+                ImGui::SameLine(0.0f, 16.0f);
 
             const bool canEnableNativeDMFG =
                 state.dlssgGameDMFGSupported || (state.streamlineVersion >= feature_version { 2, 11, 0 });

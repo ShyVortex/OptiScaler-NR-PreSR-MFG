@@ -34,6 +34,23 @@ constexpr float StatusWrapPosX(float cursorX, float avail, float menuScale)
     return cursorX + (avail > 0.0f && avail < width ? avail : width);
 }
 
+// DLSS-G override row (frame generation section). The "Override DLSSG Ratio" combo needs the game's DLSS-G maximum
+// and at least one generated frame.
+constexpr bool ShowsDlssgRatioCombo(bool hasMfgMax, int mfgMax, bool optiScalerOwnsDlssg)
+{
+    return hasMfgMax && mfgMax >= 1 && !optiScalerOwnsDlssg;
+}
+
+// The DMFG controls ("Force Dynamic MFG") only with the game's DLSS-G known (fork cdef05cd's Streamline 2.11+ gate
+// still decides whether they're enabled). They used to be drawn whenever OptiScaler didn't own DLSS-G: in games
+// without DLSS-G they were placed with SameLine after the FG selection table, past the column edge, invisible, and
+// the whole menu widened (DLSS Unlocked #42, FG-MENU-WIDTH-RATCHET.md round 3). The caller uses SameLine only when
+// the ratio combo was drawn on that line.
+constexpr bool ShowsDlssgDmfgControls(bool hasMfgMax, bool optiScalerOwnsDlssg)
+{
+    return hasMfgMax && !optiScalerOwnsDlssg;
+}
+
 // Diagnostic: the width each section of a menu column reached, measured from the column's start, in order.
 struct SectionWidths
 {

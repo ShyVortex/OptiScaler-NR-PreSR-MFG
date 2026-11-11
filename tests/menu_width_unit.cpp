@@ -25,6 +25,8 @@
 //    shows its file name with the full path in a tooltip.
 // 6. Width diagnostic: SectionWidths keeps each section's width and finds the widest, WideStreak reports once after
 //    120 wide frames in a row, and every column section and frame generation block is marked.
+// 7. DLSS-G override row (round 3): the DMFG controls only with the game's DLSS-G known, and SameLine only after the
+//    ratio combo. In games without DLSS-G the checkbox was placed after the FG selection table, past the column edge.
 
 static std::string ReadFile(const char* path)
 {
@@ -203,6 +205,36 @@ int main()
     }
     std::puts("Test 6 PASS: the width diagnostic measures every section and reports the steady state once");
 
-    std::puts("All 6 menu width tests passed.");
+    // Test 7
+    {
+        using MenuLayout::ShowsDlssgDmfgControls;
+        using MenuLayout::ShowsDlssgRatioCombo;
+        static_assert(ShowsDlssgRatioCombo(true, 3, false) && ShowsDlssgRatioCombo(true, 1, false));
+        static_assert(!ShowsDlssgRatioCombo(true, 0, false) && !ShowsDlssgRatioCombo(false, 0, false) &&
+                      !ShowsDlssgRatioCombo(true, 3, true));
+        static_assert(ShowsDlssgDmfgControls(true, false));
+        static_assert(!ShowsDlssgDmfgControls(false, false)); // game without DLSS-G (Metro, NTE)
+        static_assert(!ShowsDlssgDmfgControls(true, true));   // OptiScaler owns DLSS-G
+
+        const auto menu = Squash(ReadFile("OptiScaler/menu/menu_common.cpp"));
+        const auto start = menu.find("constboolratioComboShown=MenuLayout::ShowsDlssgRatioCombo(state.dlssgMfgMax.has_"
+                                     "value(),state.dlssgMfgMax.value_or(0),dlssgInputOrOutput);");
+        assert(start != std::string::npos);
+        const auto block = menu.substr(start, 9000);
+        assert(block.find("if(ratioComboShown){automaxInterpolationCount=state.dlssgMfgMax.value();") !=
+               std::string::npos);
+        const auto dmfg = block.find("if(MenuLayout::ShowsDlssgDmfgControls(state.dlssgMfgMax.has_value(),"
+                                     "dlssgInputOrOutput)){if(ratioComboShown)ImGui::SameLine(0.0f,16.0f);");
+        assert(dmfg != std::string::npos);
+        assert(block.find("ImGui::Checkbox(\"ForceDynamicMFG\"", dmfg) != std::string::npos);
+        // The cdef05cd enablement gate is unchanged.
+        assert(block.find("constboolcanEnableNativeDMFG=state.dlssgGameDMFGSupported||(state.streamlineVersion>="
+                          "feature_version{2,11,0});",
+                          dmfg) != std::string::npos);
+        assert(menu.find("if(!dlssgInputOrOutput){ImGui::SameLine(0.0f,16.0f);") == std::string::npos);
+    }
+    std::puts("Test 7 PASS: the DMFG controls show only with the game's DLSS-G, after the ratio combo");
+
+    std::puts("All 7 menu width tests passed.");
     return 0;
 }
