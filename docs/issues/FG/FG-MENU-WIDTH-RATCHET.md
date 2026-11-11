@@ -149,11 +149,11 @@ same session, kept by the ratchet in 3.2. A repro on the maintainer's machine is
   ```text
   Menu content is N px wide, the display M px (Menu Scale S). Widest section: <name>. Left column L px, right column R px
   ```
-  It logs again only when the widest section changes (`MenuLayout::WidestSection`, `ExceedsWidth`).
+  It logged again only when the widest section changed. Replaced in round 3 (section 7.3): it blamed the wrong
+  section.
 
 ### 6.5 Still open
-- What made the content wider than the display in kilyan82's session on `0ed77d0`.
-- The log line above names the section on the next build.
+- What made the content wider than the display in kilyan82's session on `0ed77d0`. Found in round 3 (section 7).
 
 ### 6.6 Test Verification
 - `tests/menu_header_width_unit.cpp` (5/5 PASS) builds the bundled ImGui (1.92.0 WIP) headless. Windows:
@@ -174,14 +174,93 @@ same session, kept by the ratchet in 3.2. A repro on the maintainer's machine is
   (test 6).
 - The related menu suites still pass: splash, NVSmooth30, NR gate, game-native NR, Turing and XeMFG menu.
 
-## 7. Pending In-Game Verification
-- **Maintainer (Linux, RTX 3080 Ti laptop, Ampere, so the NVSmooth30 section shows):**
-  1. Open the menu in any game and note its width.
+## 7. Round 3: A Hidden Checkbox Past the Left Column
+### 7.1 Report
+- **kilyan82, 2026-11-10:** NTE on v0.9.90-final (`28557e6`). "Open Wiki is there now, but window's still stretched."
+- **His log**, one line from `af0ffd38`:
+  ```text
+  Menu content is 2118 px wide, the display 1920 px (Menu Scale 1.00). Widest section: Graphs. Left column 1055 px, right column 409 px
+  ```
+- **Maintainer reproduction, 2026-11-11:** Metro 2033 Redux on Linux, `ee43f5b`, display 2560×1440. CachyOS, kernel
+  7.3.3-1-cachyos, NVIDIA GeForce RTX 3080 Ti Laptop GPU, driver 580.196.07. Lost Soul Aside on the same machine
+  did not reproduce it: that game has DLSS-G (7.3).
+
+### 7.2 Why the menu is twice the widest column
+- The main table is `SizingStretchSame` without `ImGuiTableFlags_Resizable`, so its columns are `NoResize`
+  (`imgui_tables.cpp:763`).
+- For `NoResize` stretch columns ImGui reports the table as wide as needed to give *every* column the widest one's
+  content (`auto_fit_width_for_stretched_min`, `:1451`). With two equal columns that's 2 × the widest column.
+- kilyan82's numbers: 2 × 1055 + padding ≈ 2118. One section wider than its column widens the whole menu by twice
+  the overshoot.
+- The `af0ffd38` line blamed "Graphs" wrongly: the main table adds its own width to the window in `EndTable`, after
+  the last section had been noted. It also logged a single moment, not the steady state.
+
+### 7.3 Per-section probe (`ee43f5b7`)
+- **How it measures:** `OptiScaler/menu/MenuWidthProbe.h`. Before each section, the column's `CursorMaxPos.x` is
+  reset to the column start; after it, the section's extent is recorded and the maximum restored. The layout is
+  unchanged.
+- **Marks:** every section of both columns, plus the frame generation blocks (ownership, RTX 40, RTX 20/30, XeMFG,
+  Smooth Motion, then "FG: selection" for the rest).
+- **Report:** once the menu has been wider than the display for 120 frames in a row, three lines with every
+  section's width. Repeated once per wide episode (`MenuLayout::WideStreak`).
+- **Maintainer's Metro log:**
+
+  | Menu Scale | Left column visible | `FG: selection` | Past the edge |
+  |---|---|---|---|
+  | 1.3 | 1241 px | 1476 px | 235 px = 181 × 1.3 |
+  | 2.0 | 1208 px | 1568 px | 360 px = 180 × 2.0 |
+
+  Every other section fits its column. The overshoot is a fixed ~180 px × Menu Scale: an item of fixed size placed
+  past the column edge.
+
+### 7.4 Root cause: the DMFG checkbox placed after the FG selection table (fork code)
+- **The code:** the DLSS-G override row in `RenderFrameGenerationSelection`.
+  - The "Override DLSSG Ratio" combo is drawn only when the game's DLSS-G maximum is known (`state.dlssgMfgMax`).
+  - The DMFG block after it always started with `ImGui::SameLine(0.0f, 16.0f)`.
+- **What happened in games without DLSS-G (Metro, NTE):**
+  - The combo isn't drawn, so `SameLine` attached "Force Dynamic MFG (?)" to the previous item, the FG Input /
+    Output table.
+  - That table's line ends at the column's right edge, so the checkbox sat past the edge.
+  - ImGui clips each column, so it was invisible. Its ~180 px still counted as content.
+- **History:** fork `cdef05cd` (2026-09-22, "DLSS-G: add DMFG menu options") widened the block's gate from
+  `state.dlssgGameDMFGSupported && !dlssgInputOrOutput` to `!dlssgInputOrOutput`, so DMFG could be forced on
+  Streamline 2.11+ even when the game doesn't report DMFG support. It kept the `SameLine`. Upstream (`6125a75b`)
+  still has its own gating.
+- **Why Lost Soul Aside didn't show it:** the game has DLSS-G, so the ratio combo was on the line and the checkbox
+  followed it, inside the column.
+- **Audit:** no `docs/issues/` entry covers this block.
+
+### 7.5 Solution (`86054259`)
+- The DMFG controls are drawn only when the game's DLSS-G is known: `MenuLayout::ShowsDlssgDmfgControls`
+  (`dlssgMfgMax` set, OptiScaler not owning DLSS-G).
+- `SameLine` is used only when the ratio combo was drawn on that line (`MenuLayout::ShowsDlssgRatioCombo`).
+- cdef05cd's enablement gate is unchanged: `dlssgGameDMFGSupported` or Streamline 2.11+.
+- **Visible effect:**
+  - Games without DLSS-G look the same, just at their natural width.
+  - With DLSS-G nothing changes.
+  - If a DLSS-G game reports a maximum of 0 generated frames, the checkbox now starts its own line instead of
+    following the table.
+
+### 7.6 Test Verification
+- `tests/menu_header_width_unit.cpp` (7/7 PASS, bundled ImGui headless):
+  - Test 6: the probe leaves every width unchanged, and names and measures a 1396 px line exactly.
+  - Test 7 reproduces this defect: with the checkbox placed after the FG selection table, that section measures
+    1159 px in a 929 px column and the menu grows from 1016 to 1882 px (the display cap). Without it the menu stays
+    at 1016 px.
+- `tests/menu_width_unit.cpp` (7/7 PASS):
+  - Test 6: `SectionWidths`, `WideStreak` and the marks.
+  - Test 7: both gates, the `SameLine` only after the combo, and cdef05cd's enablement gate kept.
+- Also passing: `dmfg_menu_logic_unit`, `streamline_mfg_options_unit`, and the menu suites listed in 6.6.
+
+## 8. Pending In-Game Verification
+- **Maintainer (Linux, Metro 2033 Redux, 2560×1440):**
+  1. At Menu Scale 1.3 and 2.0 the menu should be narrower than the display, and the log should have no "Menu wider
+     than the display" line.
   2. Open a wide section, e.g. "Advanced Settings", then close it: the menu should shrink back.
-  3. With `[SmoothMotion]` and NVSmooth30 enabled, restart and open the menu. On Linux the status reads "NVSmooth30
-     requires Windows …". The menu should keep its natural width.
-  4. Change Menu Scale up and back down: the width should come back each time.
+  3. Change Menu Scale up and back down: the width should come back each time.
+  4. In a game with DLSS-G (Lost Soul Aside), the "Force Dynamic MFG" checkbox should still sit after the ratio
+     combo.
 - **kilyan82 (Windows, 1080p):**
-  - The menu should no longer span the screen, and "Open Wiki" should be visible.
-  - At Menu Scale 0.5 the menu should be about half as wide.
-  - If it's still wide, `OptiScaler.log` should contain "Menu content is … Widest section: …".
+  - The menu should no longer span the screen; at Menu Scale 0.5 it should be about half as wide.
+  - If it's still wide, `OptiScaler.log` should contain the "Menu wider than the display" / "Menu left column" /
+    "Menu right column" lines.
