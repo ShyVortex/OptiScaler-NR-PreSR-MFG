@@ -252,8 +252,11 @@ same session, kept by the ratchet in 3.2. A repro on the maintainer's machine is
   - Test 7: both gates, the `SameLine` only after the combo, and cdef05cd's enablement gate kept.
 - Also passing: `dmfg_menu_logic_unit`, `streamline_mfg_options_unit`, and the menu suites listed in 6.6.
 
-## 8. Pending In-Game Verification
-- **Maintainer (Linux, Metro 2033 Redux, 2560×1440):**
+## 8. In-Game Verification
+- **Confirmed by the maintainer, 2026-11-11:** Metro 2033 Redux on Linux, `c1ed00b`, 2560×1440. The issue is fixed:
+  the menu was drawn for about 4,950 frames, and the log has no "Menu wider than the display" report. Before the
+  fix, the same setup logged it.
+- **Maintainer checklist (Linux, Metro 2033 Redux, 2560×1440):**
   1. At Menu Scale 1.3 and 2.0 the menu should be narrower than the display, and the log should have no "Menu wider
      than the display" line.
   2. Open a wide section, e.g. "Advanced Settings", then close it: the menu should shrink back.
