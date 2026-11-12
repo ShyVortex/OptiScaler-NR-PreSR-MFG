@@ -256,6 +256,9 @@ same session, kept by the ratchet in 3.2. A repro on the maintainer's machine is
 - **Confirmed by the maintainer, 2026-11-11:** Metro 2033 Redux on Linux, `c1ed00b`, 2560×1440. The issue is fixed:
   the menu was drawn for about 4,950 frames, and the log has no "Menu wider than the display" report. Before the
   fix, the same setup logged it.
+- **Confirmed by kilyan82, 2026-11-11:** Neverness to Everness on Windows, `c1ed00b`, 1920×1080, Menu Scale 1.0.
+  "No more stretch": the menu is about 960 px wide and "Open Wiki" is visible (Smooth Motion and FG off at that
+  moment; with NVSmooth30 active the menu doesn't open at all, section 6.13 of `FG-NVSMOOTH30-INTEGRATION.md`).
 - **Maintainer checklist (Linux, Metro 2033 Redux, 2560×1440):**
   1. At Menu Scale 1.3 and 2.0 the menu should be narrower than the display, and the log should have no "Menu wider
      than the display" line.
