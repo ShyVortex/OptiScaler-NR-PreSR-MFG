@@ -11,7 +11,7 @@
 // same release, keep the modular verification, and keep pruning sr/ and xefg/ (architecture rule 4).
 //
 // Validates:
-// 1. package_release.ps1 and package_release.yml fetch exactly one tag, the same one, currently 0.4.1.
+// 1. package_release.ps1 and package_release.yml fetch exactly one tag, the same one, currently 0.4.2.
 // 2. No message still names a different 0.4.N release than the pinned one.
 // 3. The script still requires backend / kernels / runtime and prunes sr / xefg.
 
@@ -48,7 +48,7 @@ int main()
     assert(scriptTags.size() == 1 && workflowTags.size() == 1);
     assert(scriptTags == workflowTags && "script and workflow must pin the same dlssg_for_sm86 release");
     const std::string pinned = *scriptTags.begin();
-    assert(pinned == "0.4.1");
+    assert(pinned == "0.4.2");
     std::printf("Test 1 PASS: both release paths pin dlssg_for_sm86 %s\n", pinned.c_str());
 
     // Test 2
