@@ -382,6 +382,16 @@ if ($IncludeAmpereMfg) {
     if (Test-Path -LiteralPath $notices) {
         Copy-Item -LiteralPath $notices -Destination "$sm86DestDir\THIRD_PARTY_NOTICES.txt"
     }
+    # The mod is MIT since 0.4.2 and its notice must ship with its DLLs. Only the release zip has LICENSE.md;
+    # the git tag fetched above does not, so the vendored copy is the fallback.
+    $sm86License = "$sm86Src\LICENSE.md"
+    if (-not (Test-Path -LiteralPath $sm86License)) {
+        $sm86License = "$root\Licenses\dlssg_for_sm86_LICENSE.md"
+    }
+    if (-not (Test-Path -LiteralPath $sm86License)) {
+        throw "Ampere/Turing SM86/SM75 licence not staged: no LICENSE.md in $sm86Src and no vendored copy"
+    }
+    Copy-Item -LiteralPath $sm86License -Destination "$sm86DestDir\LICENSE.md"
     $readme = "$sm86Src\README.en.md"
     if (Test-Path -LiteralPath $readme) {
         Copy-Item -LiteralPath $readme -Destination "$sm86DestDir\README.en.md"
