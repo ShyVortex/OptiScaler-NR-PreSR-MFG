@@ -72,4 +72,6 @@ From the release changelog (`README.en.md` "0.4.2"), the factory INI, `docs/INST
 - `tests/nvsmooth30_packaging_source_unit.cpp` (6/6 PASS): unaffected.
 - clang-format 23.1.5 clean and UTF-8 BOM present on the modified test.
 - PowerShell is not available on the analysis machine: the staging code runs only in the Package Release workflow.
-- **Pending:** the user's in-game check of a 0.4.2 package on Ampere. After it, `dlssg-sm86` is merged into `main`.
+- **In game (2026-11-17, maintainer):** The Last of Us Part II on Windows with the 0.4.2 package: frame generation
+  works through the RTX 20/30 unlocker, and the menu shows the mod as `v0.4.2`, read from the binary.
+  `dlssg-sm86` was then merged into `main`.

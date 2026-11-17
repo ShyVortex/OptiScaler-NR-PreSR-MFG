@@ -58,6 +58,12 @@ description: Architecture, frame generation, and safety rules for OptiScaler
         - `package_release.ps1` must stage both root 310.9 DLL, `310.1/dlssg_sm86.dll`, and modular 0.4.0 components (`backend/`, `kernels/`, `runtime/`) while strictly pruning `sr/` (~180 MB) and `xefg/` (5.4 MB) to prevent release bloat and conflict with native XeMFG.
         - Mandatory post-staging modular integrity assertions in packaging script and workflow pre-checks (`version.dll`, `sm86_backend.dll`, `fg_kernels.dll`, `nvngx_dlssg.dll`).
         - Dual-compatibility INI formatting supporting both 0.3.x (`[General]`, `[FrameGeneration]`) and 0.4.0 (`[DLSSG]`, `Engine=DLSS`, `Preset=C` FG Lite).
+        - **sdli1995 release pin and licence (verified in-game, TLOU2 on Windows, 0.4.2):**
+          - `package_release.ps1` and `package_release.yml` fetch the same `tags/<version>`; `tests/sm86_packaging_pin_unit.cpp` asserts it. Bump both together when a new release is adopted.
+          - The mod is MIT since 0.4.2: `OptiScaler/dlssg_sm86/LICENSE.md` must ship. The source folder's `LICENSE.md` is preferred; the git tag has none, so `Licenses/dlssg_for_sm86_LICENSE.md` is the fallback, and packaging stops without either.
+          - The mod's version is read from the binary only (`DetectModVariant`, `Status::ModVersion`); never add a version literal. Gates for removed options use `IsSdli1995AtLeast041`.
+          - Never ship `dlssg_sm86ini_Configurator.html`: `AmpereMfgLoader` rewrites `dlssg_sm86.ini` on every start.
+          - Documentation: `docs/issues/FG/FG-AMPERE-MFG-SDLI1995-041-UPDATE.md`, `docs/issues/FG/FG-AMPERE-MFG-SDLI1995-042-UPDATE.md`.
       - Associated tests:
         - `tests/dlssg_sm86_ini_smoke.cpp`
         - `tests/kernel_hooks_nvngx_dlssg_unit.cpp`
@@ -69,6 +75,8 @@ description: Architecture, frame generation, and safety rules for OptiScaler
         - `tests/streamline_external_log_capture_unit.cpp`
         - `tests/turing_dual_runtime_unit.cpp`
         - `tests/dlssg_sm86_v030_ini_unit.cpp`
+        - `tests/sm86_packaging_pin_unit.cpp`
+        - `tests/ampere_mfg_status_text_unit.cpp`
    - Always preserve **Ada (RTX 40) MFG Unlocker**:
      - `OptiScaler/framegen/dlssg/MfgUnlock.h` and `MfgUnlock.cpp`
      - Build flag `OptiScalerRtx40Mfg` must default to `true` in `OptiScaler.vcxproj` (defines `OPTISCALER_RTX40_MFG`)
