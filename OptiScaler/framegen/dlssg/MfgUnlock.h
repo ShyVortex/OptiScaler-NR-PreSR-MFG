@@ -80,6 +80,9 @@ unsigned int EffectiveMax(unsigned int nativeMaximum);
 // AdaMfgMaxFrames as this session uses it (latched at the first call; 0 = the unlocked maximum).
 int SessionMaxFramesSetting();
 
+// AdaMfgPreset as this session uses it (latched at the first call): DlssgPresetPolicy::Preset value.
+uint32_t SessionPreset();
+
 // Cheap failure severity for per-frame consumers that must clamp or disable behavior without copying
 // the full Status (including its version string).
 Failure LastFailure();

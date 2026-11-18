@@ -29,12 +29,20 @@ struct TestIntOption
     int value_or_default() const { return value; }
 };
 
+struct TestStringOption
+{
+    bool set = false;
+    std::string value;
+    std::string value_or(const char* fallback) const { return set ? value : std::string(fallback); }
+};
+
 struct Config
 {
     TestOption FGDLSSGAdaMfgUnlock;
     TestOption FGDLSSGAdaBlackwellKernels;
     TestOption FGDLSSGAmpereMfgUnlock;
     TestIntOption FGDLSSGAdaMfgMaxFrames; // 0 = unlocked maximum (AdaMfgCeiling)
+    TestStringOption FGDLSSGAdaMfgPreset; // unset = Auto (DlssgPresetPolicy)
 
     static Config* Instance()
     {

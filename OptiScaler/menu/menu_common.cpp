@@ -8,6 +8,7 @@
 #include <framegen/dlssg/AmpereMfgLoader.h>
 #include <framegen/dlssg/AmpereMfgStatusText.h>
 #include <menu/MfgSectionPolicy.h>
+#include <framegen/dlssg/DlssgPresetPolicy.h>
 #include <framegen/xefg/XeMfgLoader.h>
 #include <framegen/smoothmotion/NVSmooth30Loader.h>
 #include <nvapi/NvApiHooks.h>
@@ -3528,6 +3529,64 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
             if (adaEnabledForSession && adaMaxFrames != MfgUnlock::SessionMaxFramesSetting())
                 StatusTextWrapped(menuScale, "Save Settings and restart to apply the new ceiling.");
+
+            // DLSS-G preset, answered to the driver profile read (DlssgPresetPolicy.h)
+            {
+                const auto adaStatus = MfgUnlock::LastStatus();
+                const auto runtime = DlssgPresetPolicy::ParseVersion(adaStatus.SnippetVersion);
+                const bool runtimeKnown = runtime.has_value();
+                const bool presetCSupported = DlssgPresetPolicy::ImplementsPresetC(runtime);
+                const auto configuredPreset = DlssgPresetPolicy::Parse(config->FGDLSSGAdaMfgPreset.value_or("auto"))
+                                                  .value_or(DlssgPresetPolicy::Preset::Auto);
+
+                const char* presetLabels[] = { "Auto (game / NVIDIA app)", "Preset A", "Preset B",
+                                               "Preset C (performance mode)" };
+                const auto presetIdx = static_cast<size_t>(configuredPreset);
+                if (ImGui::BeginCombo("FG Preset##ada", presetLabels[presetIdx]))
+                {
+                    for (size_t i = 0; i < std::size(presetLabels); i++)
+                    {
+                        // C greyed out only once the runtime is known to lack it.
+                        const bool selectable =
+                            i != static_cast<size_t>(DlssgPresetPolicy::Preset::C) || !runtimeKnown || presetCSupported;
+                        if (ImGui::Selectable(presetLabels[i], i == presetIdx,
+                                              selectable ? ImGuiSelectableFlags_None : ImGuiSelectableFlags_Disabled))
+                        {
+                            config->FGDLSSGAdaMfgPreset =
+                                std::string(DlssgPresetPolicy::Name(static_cast<DlssgPresetPolicy::Preset>(i)));
+                        }
+                    }
+                    ImGui::EndCombo();
+                }
+                ShowHelpMarker("DLSS Frame Generation preset for this game only (the saved NVIDIA profile is not "
+                               "changed).\nAuto: the game / NVIDIA app decides.\nA, B: NVIDIA's original frame "
+                               "generation models.\nC: NVIDIA's performance mode, lighter on the GPU (DLSS-G 310.9.16 "
+                               "and newer).\nSave Settings and restart to apply.");
+
+                if (configuredPreset == DlssgPresetPolicy::Preset::C && runtimeKnown && !presetCSupported)
+                {
+                    ImGui::PushStyleColor(ImGuiCol_Text, toneMapColor(ImVec4(1.f, 0.75f, 0.2f, 1.f)));
+                    StatusTextWrapped(menuScale,
+                                      "DLSSG %s has no Preset C (310.9.16 or newer needed): the game's preset "
+                                      "stays.",
+                                      adaStatus.SnippetVersion.c_str());
+                    ImGui::PopStyleColor();
+                }
+
+                if (adaEnabledForSession)
+                {
+                    const auto session = static_cast<DlssgPresetPolicy::Preset>(MfgUnlock::SessionPreset());
+                    const auto answered = NvApiHooks::dlssgPresetAnswered.load();
+                    if (configuredPreset != session)
+                        StatusTextWrapped(menuScale, "Save Settings and restart to apply the new preset.");
+                    else if (answered != 0)
+                        StatusTextWrapped(menuScale, "FG preset %s applied.",
+                                          DlssgPresetPolicy::Name(static_cast<DlssgPresetPolicy::Preset>(answered)));
+                    else if (session != DlssgPresetPolicy::Preset::Auto)
+                        StatusTextWrapped(menuScale, "FG preset %s: waiting for DLSS-G to read it (%u reads so far).",
+                                          DlssgPresetPolicy::Name(session), NvApiHooks::dlssgPresetReads.load());
+                }
+            }
 
             if (adaEnabledForSession)
             {

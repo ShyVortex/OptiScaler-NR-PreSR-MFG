@@ -8,6 +8,7 @@
 #include <hooks/Streamline_Hooks.h>
 #include <misc/IdentifyGpu.h>
 #include <misc/EarlyGpuArch.h>
+#include <framegen/dlssg/DlssgPresetPolicy.h>
 
 #include <SimpleIni.h>
 
@@ -102,6 +103,11 @@ bool Config::Reload(std::filesystem::path iniPath)
             if (FGDLSSGAdaMfgMaxFrames.has_value() &&
                 (FGDLSSGAdaMfgMaxFrames.value() < 0 || FGDLSSGAdaMfgMaxFrames.value() > 5))
                 FGDLSSGAdaMfgMaxFrames.reset();
+            if (auto adaPreset = readString("DLSSG", "AdaMfgPreset"); adaPreset.has_value())
+            {
+                if (const auto parsed = DlssgPresetPolicy::Parse(adaPreset.value()); parsed.has_value())
+                    FGDLSSGAdaMfgPreset.set_from_config(std::string(DlssgPresetPolicy::Name(parsed.value())));
+            }
             if (auto ampereMode = readString("DLSSG", "AmpereMfgMode"); ampereMode.has_value())
             {
                 if (lstrcmpiA(ampereMode.value().c_str(), "internal") == 0)
@@ -1267,6 +1273,7 @@ bool Config::SaveIni(std::filesystem::path destination)
                      GetBoolValue(Instance()->FGDLSSGAdaBlackwellKernels.value_for_config()).c_str());
         ini.SetValue("DLSSG", "AdaMfgMaxFrames",
                      GetIntValue(Instance()->FGDLSSGAdaMfgMaxFrames.value_for_config()).c_str());
+        ini.SetValue("DLSSG", "AdaMfgPreset", Instance()->FGDLSSGAdaMfgPreset.value_for_config_or("auto").c_str());
         ini.SetValue("DLSSG", "AmpereMfgMode",
                      Instance()->FGDLSSGAmpereMfgMode.value_for_config_or("External").c_str());
         ini.SetValue("DLSSG", "AmpereMfgMaxFrames",

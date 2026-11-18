@@ -5,6 +5,7 @@
 
 #include "MfgUnlock.h"
 #include "AdaMfgCeiling.h"
+#include "DlssgPresetPolicy.h"
 
 #include <Config.h>
 #include <State.h>
@@ -503,6 +504,15 @@ int MfgUnlock::SessionMaxFramesSetting()
     // Latched like EnabledForSession: the game learns the capability once, so a live change would contradict it.
     static const int setting = Config::Instance()->FGDLSSGAdaMfgMaxFrames.value_or_default();
     return setting;
+}
+
+uint32_t MfgUnlock::SessionPreset()
+{
+    // DLSS-G reads its preset when frame generation starts; a menu change applies on the next start.
+    static const uint32_t preset =
+        static_cast<uint32_t>(DlssgPresetPolicy::Parse(Config::Instance()->FGDLSSGAdaMfgPreset.value_or("auto"))
+                                  .value_or(DlssgPresetPolicy::Preset::Auto));
+    return preset;
 }
 
 unsigned int MfgUnlock::EffectiveMax(unsigned int nativeMaximum)

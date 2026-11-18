@@ -683,6 +683,9 @@ class Config
     // RTX 40 unlock: most generated frames advertised to the game, 0 = unlocked maximum (6X), 1 = 2X ... 5 = 6X.
     // A ceiling only, never a forced multiplier (AdaMfgCeiling.h). Startup-only.
     CustomOptional<int> FGDLSSGAdaMfgMaxFrames { 0 };
+    // RTX 40 unlock: DLSS-G render preset answered to the driver profile read (DlssgPresetPolicy.h).
+    // Canonical: Auto / A / B / C (C: DLSS-G 310.9.16+). Startup-only.
+    CustomOptional<std::string, NoDefault> FGDLSSGAdaMfgPreset;
     // Ampere/Turing (SM86/SM75) MFG unlocker — sideloads the dlssg_for_sm86 proxy
     CustomOptional<bool> FGDLSSGAmpereMfgUnlock { false };
     CustomOptional<std::string, NoDefault> FGDLSSGAmpereMfgMode; // External (default) / Internal
