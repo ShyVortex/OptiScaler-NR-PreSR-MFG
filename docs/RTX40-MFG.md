@@ -1,14 +1,14 @@
 # RTX 40 MFG Unlock
 
 The built-in RTX 40 (Ada) MFG unlock is compiled into OptiScaler: no extra helper, ASI loader or External FG mode is
-needed. It is one of the two unlockers of the in-game **DLSS Frame Generation** section; the other is the RTX 20/30
+needed. It is one of the two unlockers of the in-game **DLSS Multi-Frame Generation (MFG)** section; the other is the RTX 20/30
 unlocker (sdli1995 `dlssg_for_sm86`).
 
 ## Build
 
 The build flag `OptiScalerRtx40Mfg` defaults to `true` in `OptiScaler.vcxproj` and defines `OPTISCALER_RTX40_MFG`
 (architecture rule §4). A build with `/p:OptiScalerRtx40Mfg=false` leaves out the unlock implementation, hooks,
-capability overrides and its menu block; the DLSS Frame Generation section then greys out the RTX 40 entry. Ordinary
+capability overrides and its menu block; the DLSS Multi-Frame Generation (MFG) section then greys out the RTX 40 entry. Ordinary
 DLSS FG/MFG remains available.
 
 ```powershell
@@ -24,7 +24,7 @@ mixing objects/PCH files. The runtime switch still defaults off.
 
 ## Enable at runtime
 
-1. In the OptiScaler overlay, open **DLSS Frame Generation**, tick **Enable DLSS FG / MFG unlocker** and leave
+1. In the OptiScaler overlay, open **DLSS Multi-Frame Generation (MFG)**, tick **Enable DLSS FG / MFG unlocker** and leave
    **Unlocker** on **Auto**: on an RTX 40 card it shows "Auto (RTX 40 unlock on this GPU)". In `OptiScaler.ini`:
 
    ```ini

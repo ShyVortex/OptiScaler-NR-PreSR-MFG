@@ -1,6 +1,6 @@
 ﻿#pragma once
 
-// DLSS Frame Generation unlocker selection ([DLSSG] MfgUnlock + MfgUnlocker).
+// DLSS Multi-Frame Generation unlocker selection ([DLSSG] MfgUnlock + MfgUnlocker).
 //
 // One switch and one choice pick the unlocker that matches the GPU:
 //   - RTX 40 (Ada): MfgUnlock::TryApply (in-memory nvngx_dlssg patch).

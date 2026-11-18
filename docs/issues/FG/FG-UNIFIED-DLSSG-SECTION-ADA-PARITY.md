@@ -1,4 +1,4 @@
-# Frame Generation: One DLSS Frame Generation Section and RTX 40 Option Parity
+# Frame Generation: One DLSS Multi-Frame Generation Section and RTX 40 Option Parity
 
 ## 1. Overview & Environment
 - **Report**: private requests to the maintainer (email, DMs), not tracked on GitHub. RTX 40 users found the RTX 40 MFG
@@ -77,7 +77,7 @@
   when IdentifyGpu reports another NVIDIA family than the startup detection.
 - **Packaging** refuses a package with `MfgUnlock`, `AdaMfgUnlock` or `AmpereMfgUnlock` switched on.
 
-### 4.2 The "DLSS Frame Generation" section (`a11ce345`)
+### 4.2 The "DLSS Multi-Frame Generation (MFG)" section (`a11ce345`)
 - **Layout.** One collapsing header holds the enable switch, an "Unlocker" combo and the sub-block of the configured
   unlocker:
   - RTX 40: Blackwell kernels, ceiling, preset and status;
@@ -94,7 +94,7 @@
   `MfgUnlock` off.
 - **Placement and width.** The section stays before the External FG early return (rule §3). It uses a plain
   `CollapsingHeader` + `Indent`, like its XeMFG sibling, bounded status lines and `SeparatorWithHelpMarker`. One width
-  mark, "FG: DLSS FG unlocker", replaces "FG: RTX 40 unlock" and "FG: RTX 20/30 unlock" (rule §10).
+  mark, "FG: DLSS MFG unlocker", replaces "FG: RTX 40 unlock" and "FG: RTX 20/30 unlock" (rule §10).
 
 ### 4.3 RTX 40 multiplier ceiling (`b403f503`)
 - **Key:** `[DLSSG] AdaMfgMaxFrames`: 0 = unlocked maximum (6X), 1 = 2X … 5 = 6X. Pure math in

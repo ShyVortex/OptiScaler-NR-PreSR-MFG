@@ -1,5 +1,5 @@
-﻿// The "DLSS Frame Generation" menu section (MfgSectionPolicy.h): lock rules, greyed-out unlocker entries, notes,
-// restart hint and the flags written after a change. Also checks how menu_common.cpp wires it.
+﻿// The "DLSS Multi-Frame Generation (MFG)" menu section (MfgSectionPolicy.h): lock rules, greyed-out unlocker entries,
+// notes, restart hint and the flags written after a change. Also checks how menu_common.cpp wires it.
 //
 // Build and run from the repository root:
 //   g++ -std=c++20 -Wall -Wextra -IOptiScaler -o /tmp/mfg_section_policy_unit tests/mfg_section_policy_unit.cpp &&
@@ -191,13 +191,13 @@ int main()
     // Test 9: menu wiring.
     {
         const auto menu = Read("OptiScaler/menu/menu_common.cpp");
-        const auto header = Find(menu, "ImGui::CollapsingHeader(\"DLSS Frame Generation\")");
+        const auto header = Find(menu, "ImGui::CollapsingHeader(\"DLSS Multi-Frame Generation (MFG)\")");
         const auto enable = Find(menu, "\"Enable DLSS FG / MFG unlocker (restart)##dlssg\"");
         const auto combo = Find(menu, "ImGui::BeginCombo(\"Unlocker##dlssg\"");
         const auto ada = Find(menu, "SeparatorWithHelpMarker(\"RTX 40 (Ada)\"");
         const auto ampere = Find(menu, "SeparatorWithHelpMarker(\"RTX 20 / 30 (Turing / Ampere)\"");
         const auto ampereStatus = Find(menu, "AmpereMfgStatusText::HeadlineText(status)");
-        const auto mark = Find(menu, "MarkMenuSection(\"FG: DLSS FG unlocker\");");
+        const auto mark = Find(menu, "MarkMenuSection(\"FG: DLSS MFG unlocker\");");
         const auto xemfg = Find(menu, "ImGui::CollapsingHeader(\"Intel Xe Multi-Frame Generation (XeMFG)\")");
         const auto earlyReturn = Find(menu, "if (state.externalFrameGeneration)\n");
 

@@ -111,7 +111,7 @@ static FrameResult Frame(float scale, bool longLine, bool openWideSection)
                 ScopedCollapsingHeader section("Advanced DLSS Settings");
             }
             {
-                ScopedCollapsingHeader section("DLSS Frame Generation");
+                ScopedCollapsingHeader section("DLSS Multi-Frame Generation (MFG)");
             }
             if (g_probe)
                 MenuWidthProbe::MarkMenuSection("Upscalers");

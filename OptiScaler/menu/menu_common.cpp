@@ -3331,7 +3331,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                            "(startup-only; change DLSSG.AmpereMfgMode).");
         else
             ShowHelpMarker("Automatically locked to enabled because the RTX 20 / 30 MFG unlocker is active.\n"
-                           "To disable External FG, turn off the DLSS Frame Generation unlocker below first.");
+                           "To disable External FG, turn off the DLSS MFG unlocker below first.");
     }
     else
     {
@@ -3354,7 +3354,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     auto& menuResScale = ctx.menuResScale;
     MarkMenuSection("FG: ownership");
 
-    // ── DLSS Frame Generation: the RTX 20 / 30 / 40 MFG unlocker ────
+    // ── DLSS Multi-Frame Generation (MFG): the RTX 20 / 30 / 40 unlocker ────
     // One switch ([DLSSG] MfgUnlock) and one choice (MfgUnlocker). The menu writes the unlocker flags the way config
     // load resolves them on the next start (MfgSectionPolicy), so the sub-blocks below follow the configured owner.
 #if defined(OPTISCALER_RTX40_MFG)
@@ -3377,7 +3377,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     mfgInputs.sessionExternal = state.externalFrameGeneration;
     const auto mfgView = MfgSectionPolicy::Resolve(mfgInputs);
 
-    if (ImGui::CollapsingHeader("DLSS Frame Generation"))
+    if (ImGui::CollapsingHeader("DLSS Multi-Frame Generation (MFG)"))
     {
         ImGui::Indent();
 
@@ -4010,7 +4010,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         ImGui::Unindent();
     }
 
-    MarkMenuSection("FG: DLSS FG unlocker");
+    MarkMenuSection("FG: DLSS MFG unlocker");
 
     // ── Intel Xe Multi-Frame Generation (XeMFG) Unlock ──────────────
     if (ImGui::CollapsingHeader("Intel Xe Multi-Frame Generation (XeMFG)"))
@@ -4041,14 +4041,14 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             else if (adaActive)
             {
                 ShowHelpMarker("Disabled because the RTX 40 MFG unlock is active.\n"
-                               "Turn off the DLSS Frame Generation unlocker first, Save Settings and restart.");
+                               "Turn off the DLSS MFG unlocker first, Save Settings and restart.");
             }
             else
             {
                 ShowHelpMarker(externalActive ? "Disabled because external frame generation is selected.\n"
                                                 "Disable External first, Save Settings and restart."
                                               : "Disabled because the RTX 20 / 30 MFG unlocker is active.\n"
-                                                "Turn off the DLSS Frame Generation unlocker first, Save Settings "
+                                                "Turn off the DLSS MFG unlocker first, Save Settings "
                                                 "and restart.");
             }
         }

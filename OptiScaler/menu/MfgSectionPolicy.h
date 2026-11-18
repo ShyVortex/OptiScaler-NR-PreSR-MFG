@@ -1,6 +1,7 @@
 ﻿#pragma once
 
-// The "DLSS Frame Generation" menu section: what it shows and what can be changed. Pure (no ImGui, Config or State).
+// The "DLSS Multi-Frame Generation (MFG)" menu section: what it shows and what can be changed. Pure (no ImGui, Config
+// or State).
 //
 // The menu edits [DLSSG] MfgUnlock / MfgUnlocker, then writes the unlocker flags (FGDLSSGAdaMfgUnlock /
 // FGDLSSGAmpereMfgUnlock) the way config load will resolve them on the next start (MfgUnlockerSelect::Resolve with
@@ -81,7 +82,7 @@ inline View Resolve(const Inputs& in)
         view.locked = true;
         view.lockReason = (in.primaryIsNvidia && in.primaryNvapiArch >= kNvapiArchBlackwell)
                               ? "RTX 50 series runs DLSS Multi Frame Generation natively: no unlocker is needed."
-                              : "This NVIDIA GPU has no DLSS Frame Generation unlocker (RTX 20, 30 or 40 needed).";
+                              : "This NVIDIA GPU has no DLSS MFG unlocker (RTX 20, 30 or 40 needed).";
     }
 
     if (view.locked)

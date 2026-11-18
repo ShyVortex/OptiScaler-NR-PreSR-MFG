@@ -90,7 +90,7 @@ If you changed `[Libraries] OptiDllPath`, use its `streamline` subfolder instead
 
 Keep the game's working Streamline files and use the game's/external mod's controls.
 For an external MFG unlocker (a separate mod), use `[FrameGen] External=true`. OptiScaler's built-in
-RTX 40 unlock is different: it runs with `External=false` from the DLSS Frame Generation section, see
+RTX 40 unlock is different: it runs with `External=false` from the DLSS Multi-Frame Generation (MFG) section, see
 [RTX40-MFG.md](RTX40-MFG.md).
 That option requires a build containing commit `a60f3c93` or later; the v0.5 release does not implement
 it. Adding this downloader to an older install does not upgrade its OptiScaler DLL.
