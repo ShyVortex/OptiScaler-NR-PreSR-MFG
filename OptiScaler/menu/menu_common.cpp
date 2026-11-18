@@ -7,6 +7,7 @@
 #endif
 #include <framegen/dlssg/AmpereMfgLoader.h>
 #include <framegen/dlssg/AmpereMfgStatusText.h>
+#include <menu/MfgSectionPolicy.h>
 #include <framegen/xefg/XeMfgLoader.h>
 #include <framegen/smoothmotion/NVSmooth30Loader.h>
 #include <nvapi/NvApiHooks.h>
@@ -3328,8 +3329,8 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             ShowHelpMarker("Locked to disabled: AmpereMfgMode=Internal drives OptiScaler's own FG route "
                            "(startup-only; change DLSSG.AmpereMfgMode).");
         else
-            ShowHelpMarker("Automatically locked to enabled because the Ampere (SM86) MFG unlocker is active.\n"
-                           "To disable External FG, disable Ampere SM86 MFG below first.");
+            ShowHelpMarker("Automatically locked to enabled because the RTX 20 / 30 MFG unlocker is active.\n"
+                           "To disable External FG, turn off the DLSS Frame Generation unlocker below first.");
     }
     else
     {
@@ -3352,153 +3353,197 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     auto& menuResScale = ctx.menuResScale;
     MarkMenuSection("FG: ownership");
 
+    // ── DLSS Frame Generation: the RTX 20 / 30 / 40 MFG unlocker ────
+    // One switch ([DLSSG] MfgUnlock) and one choice (MfgUnlocker). The menu writes the unlocker flags the way config
+    // load resolves them on the next start (MfgSectionPolicy), so the sub-blocks below follow the configured owner.
 #if defined(OPTISCALER_RTX40_MFG)
+    constexpr bool adaBuilt = true;
     const bool adaEnabledForSession = MfgUnlock::EnabledForSession();
-    bool adaUnlock = config->FGDLSSGAdaMfgUnlock.value_or_default();
-    const bool isAda = primaryGpu.vendorId == VendorId::Nvidia &&
-                       primaryGpu.nvidiaArchInfo.architecture_id == NV_GPU_ARCHITECTURE_AD100;
-    const bool disableAda = !isAda || ampereActive || xeActive || state.externalFrameGeneration;
-
-    if (disableAda)
-    {
-        ImGui::BeginDisabled();
-        ImGui::Checkbox("RTX 40 MFG unlock (restart)", &adaUnlock);
-        ImGui::EndDisabled();
-        if (!isAda)
-        {
-            ShowHelpMarker("Disabled because the active GPU is not NVIDIA Ada Lovelace (RTX 40 series).");
-        }
-        else if (ampereActive)
-        {
-            ShowHelpMarker("Disabled because the Ampere (RTX 30) SM86 MFG unlock is active.\n"
-                           "Disable AmpereMfgUnlock first, Save Settings and restart.");
-        }
-        else if (xeActive)
-        {
-            ShowHelpMarker("Disabled because the Intel XeMFG unlock is active.\n"
-                           "Disable XeMfgUnlock first, Save Settings and restart.");
-        }
-        else
-        {
-            ShowHelpMarker("Disabled because External frame generation is active.\n"
-                           "Disable External FG first, Save Settings and restart.");
-        }
-    }
-    else
-    {
-        if (ImGui::Checkbox("RTX 40 MFG unlock (restart)", &adaUnlock))
-        {
-            config->FGDLSSGAdaMfgUnlock = adaUnlock;
-            if (adaUnlock)
-            {
-                config->FGDLSSGAmpereMfgUnlock = false;
-                config->XeMfgUnlock = false;
-                config->XeMfgSrEnable = false;
-                config->FGDLSSGSmoothMotion = false;
-                NvApiHooks::ApplySmoothMotionDrs(false);
-            }
-        }
-        ShowHelpMarker("Experimental. Save Settings and restart. Requires a supported DLSSG runtime."
-                       "\nDo not combine with another MFG unlocker.");
-    }
-
-    if (isAda && (adaUnlock || adaEnabledForSession) && !disableAda)
-    {
-        bool adaBlackwell = config->FGDLSSGAdaBlackwellKernels.value_or_default();
-        if (ImGui::Checkbox("Retarget Blackwell kernels (faster 3X+ MFG, restart)", &adaBlackwell))
-            config->FGDLSSGAdaBlackwellKernels = adaBlackwell;
-        ShowHelpMarker("Retargets optimized Blackwell PTX interpolation kernels in nvngx_dlssg.dll to Ada (sm_89).\n"
-                       "Recommended for smooth 3X-6X frame pacing on high-refresh VRR/FreeSync/G-Sync monitors.\n"
-                       "Save Settings and restart after changing.");
-
-        const auto status = MfgUnlock::LastStatus();
-        if (adaUnlock != adaEnabledForSession)
-            StatusTextWrapped(menuScale, "Save Settings and restart to apply this change.");
-        else if (!status.ModuleFound)
-            StatusTextWrapped(menuScale, "Waiting for DLSSG to load.");
-        else if (status.AdvertiseMatched && status.ValidateMatched)
-        {
-            if (status.KernelsRewritten > 0)
-                StatusTextWrapped(menuScale,
-                                  "DLSSG %s: RTX 40 MFG unlock applied with Blackwell kernels (%u containers).",
-                                  status.SnippetVersion.c_str(), status.KernelsRewritten);
-            else
-                StatusTextWrapped(menuScale, "DLSSG %s: RTX 40 MFG unlock applied (stock Ada kernels).",
-                                  status.SnippetVersion.c_str());
-        }
-        else
-            StatusTextWrapped(menuScale, "DLSSG %s: unlock unavailable for this runtime.",
-                              status.SnippetVersion.c_str());
-    }
+#else
+    constexpr bool adaBuilt = false;
+    [[maybe_unused]] const bool adaEnabledForSession = false;
 #endif
-    MarkMenuSection("FG: RTX 40 unlock");
+    MfgSectionPolicy::Inputs mfgInputs;
+    mfgInputs.startupArch = state.mfgUnlocker.arch;
+    mfgInputs.primaryIsNvidia = isNvidia;
+    mfgInputs.primaryNvapiArch = static_cast<uint32_t>(primaryGpu.nvidiaArchInfo.architecture_id);
+    mfgInputs.configuredEnabled = config->FGDLSSGMfgUnlock.value_or_default();
+    mfgInputs.configuredChoice = MfgUnlockerSelect::ParseChoice(config->FGDLSSGMfgUnlocker.value_or("auto"))
+                                     .value_or(MfgUnlockerSelect::Choice::Auto);
+    mfgInputs.sessionOwner = state.mfgUnlocker.owner;
+    mfgInputs.xeMfgActive = xeActive;
+    mfgInputs.adaBuilt = adaBuilt;
+    mfgInputs.sessionExternal = state.externalFrameGeneration;
+    const auto mfgView = MfgSectionPolicy::Resolve(mfgInputs);
 
-    // ── Ampere/Turing (SM86/SM75) MFG Unlock ─────────────────────────
-    if (ImGui::CollapsingHeader("RTX 20 / 30 (SM75 / SM86) MFG Unlock"))
+    if (ImGui::CollapsingHeader("DLSS Frame Generation"))
     {
         ImGui::Indent();
 
-        bool ampereUnlock = config->FGDLSSGAmpereMfgUnlock.value_or_default();
-
-        // Mutual exclusion: disable if Ada, XeMFG, or XeMFG-SR is already enabled
-        const bool adaActive = config->FGDLSSGAdaMfgUnlock.value_or_default();
-        if (adaActive || xeActive)
+        // Stores the switch and choice, then the flags for the owner the next start gets, with the side effects the
+        // separate RTX 40 and RTX 20/30 checkboxes had.
+        auto applyUnlocker = [&](bool enabled, MfgUnlockerSelect::Choice choice)
         {
-            ImGui::BeginDisabled();
-            ImGui::Checkbox("Enable SM86/SM75 MFG (experimental; restart)##ampere", &ampereUnlock);
-            ImGui::EndDisabled();
-            if (adaActive)
+            config->FGDLSSGMfgUnlock = enabled;
+            config->FGDLSSGMfgUnlocker = std::string(MfgUnlockerSelect::ChoiceName(choice));
+
+            auto next = mfgInputs;
+            next.configuredEnabled = enabled;
+            next.configuredChoice = choice;
+            const auto owner = MfgSectionPolicy::Resolve(next).configuredOwner;
+            const auto flags = MfgSectionPolicy::FlagsFor(owner);
+            config->FGDLSSGAdaMfgUnlock = flags.ada;
+            config->FGDLSSGAmpereMfgUnlock = flags.turingAmpere;
+
+            if (owner == MfgUnlockerSelect::Owner::None)
+                return;
+
+            config->XeMfgUnlock = false;
+            config->XeMfgSrEnable = false;
+            config->FGDLSSGSmoothMotion = false;
+            NvApiHooks::ApplySmoothMotionDrs(false);
+
+            if (owner == MfgUnlockerSelect::Owner::TuringAmpere)
             {
-                ShowHelpMarker("Disabled because the Ada (RTX 40) MFG unlock is active.\n"
-                               "Disable AdaMfgUnlock first, Save Settings and restart.");
+                // Internal mode drives OptiScaler's own FG route, so External FG must stay off.
+                if (config->FGDLSSGAmpereMfgMode.value_or("External") != "Internal")
+                    config->ExternalFrameGeneration = true;
+                AmpereMfgLoader::ProbeCandidate(true);
             }
-            else
-            {
-                ShowHelpMarker("Disabled because the Intel XeMFG unlock is active.\n"
-                               "Disable XeMfgUnlock first, Save Settings and restart.");
-            }
+        };
+
+        bool unlockerEnabled = mfgInputs.configuredEnabled;
+        ImGui::BeginDisabled(!mfgView.enableInteractive);
+        if (ImGui::Checkbox("Enable DLSS FG / MFG unlocker (restart)##dlssg", &unlockerEnabled) &&
+            mfgView.enableInteractive)
+        {
+            applyUnlocker(unlockerEnabled, mfgInputs.configuredChoice);
+        }
+        ImGui::EndDisabled();
+        ShowHelpMarker(!mfgView.enableBlockedReason.empty()
+                           ? mfgView.enableBlockedReason.c_str()
+                           : "Unlocks DLSS Multi Frame Generation (3X-6X) on RTX 20, 30 and 40 series GPUs.\n"
+                             "The unlocker that matches the GPU is chosen below: the built-in RTX 40 unlock or the\n"
+                             "sdli1995 RTX 20/30 unlocker. RTX 50 runs MFG natively.\n"
+                             "Do not combine with another MFG unlocker. Save Settings and restart.");
+
+        if (mfgView.locked)
+        {
+            ImGui::PushStyleColor(ImGuiCol_Text, toneMapColor(ImVec4(1.f, 0.75f, 0.2f, 1.f)));
+            StatusTextWrapped(menuScale, "%s", mfgView.lockReason.c_str());
+            ImGui::PopStyleColor();
         }
         else
         {
-            if (ImGui::Checkbox("Enable SM86/SM75 MFG (experimental; restart)##ampere", &ampereUnlock))
+            const char* choiceLabels[] = { mfgView.autoLabel.c_str(),
+                                           adaBuilt ? "RTX 40 (Ada)" : "RTX 40 (Ada, not in this build)",
+                                           "RTX 20 / 30 (Turing / Ampere)" };
+            const auto selected = static_cast<size_t>(mfgInputs.configuredChoice);
+            if (ImGui::BeginCombo("Unlocker##dlssg", choiceLabels[selected]))
             {
-                config->FGDLSSGAmpereMfgUnlock = ampereUnlock;
-                if (ampereUnlock)
+                for (size_t i = 0; i < std::size(choiceLabels); i++)
                 {
-                    // Internal mode drives OptiScaler's own FG route, so External FG must stay off.
-                    if (config->FGDLSSGAmpereMfgMode.value_or("External") != "Internal")
-                        config->ExternalFrameGeneration = true;
-                    config->FGDLSSGAdaMfgUnlock = false;
-                    config->XeMfgUnlock = false;
-                    config->XeMfgSrEnable = false;
-                    config->FGDLSSGSmoothMotion = false;
-                    NvApiHooks::ApplySmoothMotionDrs(false);
-                    AmpereMfgLoader::ProbeCandidate(true);
+                    const ImGuiSelectableFlags flags =
+                        mfgView.choiceSelectable[i] ? ImGuiSelectableFlags_None : ImGuiSelectableFlags_Disabled;
+                    if (ImGui::Selectable(choiceLabels[i], i == selected, flags) && i != selected)
+                        applyUnlocker(mfgInputs.configuredEnabled, static_cast<MfgUnlockerSelect::Choice>(i));
                 }
+                ImGui::EndCombo();
+            }
+            ShowHelpMarker("Auto picks the unlocker for the GPU found at startup: RTX 40 -> RTX 40 unlock,\n"
+                           "RTX 20 / 30 -> RTX 20 / 30 unlocker. Choose one by hand only if the GPU was not\n"
+                           "identified. Entries for another GPU family are greyed out.\n"
+                           "Save Settings and restart to apply.");
+
+            if (!mfgView.choiceNote.empty())
+            {
+                ImGui::PushStyleColor(ImGuiCol_Text, toneMapColor(ImVec4(1.f, 0.75f, 0.2f, 1.f)));
+                StatusTextWrapped(menuScale, "%s", mfgView.choiceNote.c_str());
+                ImGui::PopStyleColor();
             }
 
-            const auto& probeStatus = AmpereMfgLoader::LastStatus();
-            std::string helpText =
-                (probeStatus.Variant == AmpereMfgLoader::ModVariant::SilyNoMeta)
-                    ? ("SilyNoMeta Ampere/Turing unlock (" + probeStatus.ModName +
-                       "). Sideloads the dlssg_for_sm86 proxy.\n"
-                       "Supports Dynamic Multi-Frame Generation, live control, and universal proxy initialization.\n"
-                       "Auto-enables External FG mode: the game controls MFG from its own menu.\n"
-                       "Supports RTX 20 (SM75) and RTX 30 (SM86) series. Save Settings and restart.\n"
-                       "Do not combine with the Ada unlock or another external MFG unlocker.\n"
-                       "With AmpereMfgMode=Internal, OptiScaler's own FG route stays active and the mod "
-                       "serves its DLSS-G output (experimental; startup-only).")
-                    : ("sdli1995 Ampere/Turing unlock. Sideloads the dlssg_for_sm86 proxy.\n"
-                       "Auto-enables External FG mode: the game controls MFG from its own menu.\n"
-                       "Supports RTX 20 (SM75) and RTX 30 (SM86) series. Save Settings and restart.\n"
-                       "Do not combine with the Ada unlock or another external MFG unlocker.\n"
-                       "With AmpereMfgMode=Internal, OptiScaler's own FG route stays active and the mod "
-                       "serves its DLSS-G output (experimental; startup-only).");
-            ShowHelpMarker(helpText.c_str());
+            if (state.mfgUnlockerArchMismatch)
+            {
+                ImGui::PushStyleColor(ImGuiCol_Text, toneMapColor(ImVec4(1.f, 0.75f, 0.2f, 1.f)));
+                StatusTextWrapped(menuScale, "The GPU found at startup is not the one the driver reports now. If the "
+                                             "wrong unlocker is shown, choose yours by hand.");
+                ImGui::PopStyleColor();
+                ShowHelpMarker("Startup reads the PCI ids of the installed GPUs; the driver reports the GPU the game "
+                               "uses.\nThe log line \"DLSS FG unlocker:\" lists what was found.");
+            }
         }
 
-        if (ampereUnlock)
+        if (mfgView.restartNeeded)
+            StatusTextWrapped(menuScale, "Save Settings and restart to apply this change.");
+
+#if defined(OPTISCALER_RTX40_MFG)
+        // ── RTX 40 (Ada) ──
+        if (config->FGDLSSGAdaMfgUnlock.value_or_default() || adaEnabledForSession)
         {
+            SeparatorWithHelpMarker("RTX 40 (Ada)", "Built-in in-memory unlock of the game's nvngx_dlssg.dll. "
+                                                    "Requires a supported DLSSG runtime.\nRuns only while OptiScaler "
+                                                    "owns DLSS-G (not in External FG mode). Experimental.");
+
+            if (mfgView.adaBlockedByExternal)
+            {
+                ImGui::PushStyleColor(ImGuiCol_Text, toneMapColor(ImVec4(1.f, 0.75f, 0.2f, 1.f)));
+                StatusTextWrapped(menuScale, "The RTX 40 unlock does not run in External FG mode: turn off External "
+                                             "frame generation above, Save Settings and restart.");
+                ImGui::PopStyleColor();
+            }
+
+            bool adaBlackwell = config->FGDLSSGAdaBlackwellKernels.value_or_default();
+            if (ImGui::Checkbox("Retarget Blackwell kernels (faster 3X+ MFG, restart)", &adaBlackwell))
+                config->FGDLSSGAdaBlackwellKernels = adaBlackwell;
+            ShowHelpMarker(
+                "Retargets optimized Blackwell PTX interpolation kernels in nvngx_dlssg.dll to Ada (sm_89).\n"
+                "Recommended for smooth 3X-6X frame pacing on high-refresh VRR/FreeSync/G-Sync monitors.\n"
+                "Save Settings and restart after changing.");
+
+            if (adaEnabledForSession)
+            {
+                const auto status = MfgUnlock::LastStatus();
+                if (!status.ModuleFound)
+                    StatusTextWrapped(menuScale, "Waiting for DLSSG to load.");
+                else if (status.AdvertiseMatched && status.ValidateMatched)
+                {
+                    if (status.KernelsRewritten > 0)
+                        StatusTextWrapped(menuScale,
+                                          "DLSSG %s: RTX 40 MFG unlock applied with Blackwell kernels (%u containers).",
+                                          status.SnippetVersion.c_str(), status.KernelsRewritten);
+                    else
+                        StatusTextWrapped(menuScale, "DLSSG %s: RTX 40 MFG unlock applied (stock Ada kernels).",
+                                          status.SnippetVersion.c_str());
+                }
+                else
+                    StatusTextWrapped(menuScale, "DLSSG %s: unlock unavailable for this runtime.",
+                                      status.SnippetVersion.c_str());
+            }
+        }
+#endif
+
+        // ── RTX 20 / 30 (Turing / Ampere) ──
+        if (ampereActive)
+        {
+            {
+                const auto& probeStatus = AmpereMfgLoader::LastStatus();
+                const std::string helpText =
+                    (probeStatus.Variant == AmpereMfgLoader::ModVariant::SilyNoMeta)
+                        ? ("SilyNoMeta Ampere/Turing unlock (" + probeStatus.ModName +
+                           "). Sideloads the dlssg_for_sm86 proxy.\n"
+                           "Supports Dynamic Multi-Frame Generation, live control, and universal proxy "
+                           "initialization.\n"
+                           "Auto-enables External FG mode: the game controls MFG from its own menu.\n"
+                           "Supports RTX 20 (SM75) and RTX 30 (SM86) series. Save Settings and restart.\n"
+                           "With AmpereMfgMode=Internal, OptiScaler's own FG route stays active and the mod "
+                           "serves its DLSS-G output (experimental; startup-only).")
+                        : ("sdli1995 Ampere/Turing unlock. Sideloads the dlssg_for_sm86 proxy.\n"
+                           "Auto-enables External FG mode: the game controls MFG from its own menu.\n"
+                           "Supports RTX 20 (SM75) and RTX 30 (SM86) series. Save Settings and restart.\n"
+                           "With AmpereMfgMode=Internal, OptiScaler's own FG route stays active and the mod "
+                           "serves its DLSS-G output (experimental; startup-only).");
+                SeparatorWithHelpMarker("RTX 20 / 30 (Turing / Ampere)", helpText.c_str());
+            }
             const auto& status = AmpereMfgLoader::LastStatus();
             const bool hasDynamicSupport = status.HasDynamicMfgSupport;
             bool dynamicMfg =
@@ -3866,7 +3911,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         ImGui::Unindent();
     }
 
-    MarkMenuSection("FG: RTX 20/30 unlock");
+    MarkMenuSection("FG: DLSS FG unlocker");
 
     // ── Intel Xe Multi-Frame Generation (XeMFG) Unlock ──────────────
     if (ImGui::CollapsingHeader("Intel Xe Multi-Frame Generation (XeMFG)"))
@@ -3896,15 +3941,16 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             }
             else if (adaActive)
             {
-                ShowHelpMarker("Disabled because the Ada (RTX 40) MFG unlock is active.\n"
-                               "Disable AdaMfgUnlock first, Save Settings and restart.");
+                ShowHelpMarker("Disabled because the RTX 40 MFG unlock is active.\n"
+                               "Turn off the DLSS Frame Generation unlocker first, Save Settings and restart.");
             }
             else
             {
                 ShowHelpMarker(externalActive ? "Disabled because external frame generation is selected.\n"
                                                 "Disable External first, Save Settings and restart."
-                                              : "Disabled because the Ampere (SM86) MFG unlock is active.\n"
-                                                "Disable AmpereMfgUnlock first, Save Settings and restart.");
+                                              : "Disabled because the RTX 20 / 30 MFG unlocker is active.\n"
+                                                "Turn off the DLSS Frame Generation unlocker first, Save Settings "
+                                                "and restart.");
             }
         }
         else
@@ -3914,6 +3960,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 config->XeMfgUnlock = xeUnlock;
                 if (xeUnlock)
                 {
+                    config->FGDLSSGMfgUnlock = false;
                     config->FGDLSSGAdaMfgUnlock = false;
                     config->FGDLSSGAmpereMfgUnlock = false;
                     config->XeMfgSrEnable = false;

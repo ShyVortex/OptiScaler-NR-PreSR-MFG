@@ -13,7 +13,8 @@
 //
 // Validates:
 // 1. Headline states: running, not running (with the error), starting.
-// 2. "RTX 20/30" order matches the "RTX 20 / 30 (SM75 / SM86) MFG Unlock" header; mod name falls back to sdli1995.
+// 2. "RTX 20/30" order matches the "RTX 20 / 30 (Turing / Ampere)" sub-block of "DLSS Frame Generation"; mod name falls
+// back to sdli1995.
 // 3. Multiplier line: game menu + restart for sdli1995, live from OptiScaler for SilyNoMeta.
 // 4. Details: live control is active / ready / "not supported by this mod", never "n/a"; fields kept.
 // 5. The menu uses the helpers in place of the old one-line status.
@@ -104,7 +105,7 @@ int main()
     const std::string menu = ReadFile("OptiScaler/menu/menu_common.cpp");
     assert(menu.find("#include <framegen/dlssg/AmpereMfgStatusText.h>") != std::string::npos);
     assert(menu.find("Live: %s") == std::string::npos && "the old one-line status is gone");
-    const auto header = menu.find("CollapsingHeader(\"RTX 20 / 30 (SM75 / SM86) MFG Unlock\")");
+    const auto header = menu.find("CollapsingHeader(\"DLSS Frame Generation\")");
     const auto headline = menu.find("AmpereMfgStatusText::HeadlineText(status)");
     const auto marker = menu.find("ShowHelpMarker(details.c_str());");
     const auto multiplier = menu.find("AmpereMfgStatusText::MultiplierText(status)");
