@@ -23,11 +23,18 @@ struct TestOption
     bool value_or_default() const { return enabled; }
 };
 
+struct TestIntOption
+{
+    int value = 0;
+    int value_or_default() const { return value; }
+};
+
 struct Config
 {
     TestOption FGDLSSGAdaMfgUnlock;
     TestOption FGDLSSGAdaBlackwellKernels;
     TestOption FGDLSSGAmpereMfgUnlock;
+    TestIntOption FGDLSSGAdaMfgMaxFrames; // 0 = unlocked maximum (AdaMfgCeiling)
 
     static Config* Instance()
     {

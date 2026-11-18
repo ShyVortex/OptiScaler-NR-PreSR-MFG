@@ -98,6 +98,10 @@ bool Config::Reload(std::filesystem::path iniPath)
                 }
             }
             FGDLSSGAdaBlackwellKernels.set_from_config(readBool("DLSSG", "AdaBlackwellKernels"));
+            FGDLSSGAdaMfgMaxFrames.set_from_config(readInt("DLSSG", "AdaMfgMaxFrames"));
+            if (FGDLSSGAdaMfgMaxFrames.has_value() &&
+                (FGDLSSGAdaMfgMaxFrames.value() < 0 || FGDLSSGAdaMfgMaxFrames.value() > 5))
+                FGDLSSGAdaMfgMaxFrames.reset();
             if (auto ampereMode = readString("DLSSG", "AmpereMfgMode"); ampereMode.has_value())
             {
                 if (lstrcmpiA(ampereMode.value().c_str(), "internal") == 0)
@@ -1261,6 +1265,8 @@ bool Config::SaveIni(std::filesystem::path destination)
         }
         ini.SetValue("DLSSG", "AdaBlackwellKernels",
                      GetBoolValue(Instance()->FGDLSSGAdaBlackwellKernels.value_for_config()).c_str());
+        ini.SetValue("DLSSG", "AdaMfgMaxFrames",
+                     GetIntValue(Instance()->FGDLSSGAdaMfgMaxFrames.value_for_config()).c_str());
         ini.SetValue("DLSSG", "AmpereMfgMode",
                      Instance()->FGDLSSGAmpereMfgMode.value_for_config_or("External").c_str());
         ini.SetValue("DLSSG", "AmpereMfgMaxFrames",

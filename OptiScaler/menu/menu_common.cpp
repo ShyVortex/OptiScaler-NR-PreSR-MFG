@@ -3500,6 +3500,35 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 "Recommended for smooth 3X-6X frame pacing on high-refresh VRR/FreeSync/G-Sync monitors.\n"
                 "Save Settings and restart after changing.");
 
+            // Multiplier ceiling: lowers what the game is offered, never forces a multiplier (AdaMfgCeiling.h).
+            int adaMaxFrames = config->FGDLSSGAdaMfgMaxFrames.value_or_default();
+            if (adaMaxFrames < 0 || adaMaxFrames > 5)
+                adaMaxFrames = 0;
+            const char* adaFrameLabels[] = { "Unlocked maximum (up to 6X)",
+                                             "1 (up to 2X only)",
+                                             "2 (up to 3X)",
+                                             "3 (up to 4X)",
+                                             "4 (up to 5X)",
+                                             "5 (up to 6X)" };
+            if (ImGui::SliderInt("Max Multiplier Ceiling##ada", &adaMaxFrames, 0, 5, adaFrameLabels[adaMaxFrames]))
+                config->FGDLSSGAdaMfgMaxFrames = adaMaxFrames;
+            ShowHelpMarker("Highest multiplier offered to the game (1=2X, 2=3X, 3=4X, 4=5X, 5=6X).\n"
+                           "The game's frame generation setting (or Override DLSSG Ratio) still picks the active "
+                           "multiplier;\nthis only hides the options above the ceiling.\n\n"
+                           "Setting it to 1 (up to 2X only) tells the game Multi Frame Generation is unsupported, so "
+                           "its 3X+ options disappear.\n"
+                           "Save Settings and restart to apply.");
+
+            if (adaMaxFrames == 1)
+            {
+                ImGui::PushStyleColor(ImGuiCol_Text, toneMapColor(ImVec4(1.f, 0.75f, 0.2f, 1.f)));
+                StatusTextWrapped(menuScale, "Ceiling set to 2X: the game will hide its 3X+ frame generation options.");
+                ImGui::PopStyleColor();
+            }
+
+            if (adaEnabledForSession && adaMaxFrames != MfgUnlock::SessionMaxFramesSetting())
+                StatusTextWrapped(menuScale, "Save Settings and restart to apply the new ceiling.");
+
             if (adaEnabledForSession)
             {
                 const auto status = MfgUnlock::LastStatus();

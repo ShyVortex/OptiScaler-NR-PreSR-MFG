@@ -680,6 +680,9 @@ class Config
     CustomOptional<std::string, NoDefault> FGDLSSGMfgUnlocker; // canonical: auto / ada / turing-ampere
     CustomOptional<bool> FGDLSSGAdaMfgUnlock { false };
     CustomOptional<bool> FGDLSSGAdaBlackwellKernels { true };
+    // RTX 40 unlock: most generated frames advertised to the game, 0 = unlocked maximum (6X), 1 = 2X ... 5 = 6X.
+    // A ceiling only, never a forced multiplier (AdaMfgCeiling.h). Startup-only.
+    CustomOptional<int> FGDLSSGAdaMfgMaxFrames { 0 };
     // Ampere/Turing (SM86/SM75) MFG unlocker — sideloads the dlssg_for_sm86 proxy
     CustomOptional<bool> FGDLSSGAmpereMfgUnlock { false };
     CustomOptional<std::string, NoDefault> FGDLSSGAmpereMfgMode; // External (default) / Internal

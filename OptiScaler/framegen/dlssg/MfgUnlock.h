@@ -74,7 +74,11 @@ unsigned int UnlockedMax();
 
 // Applies the verified ceiling to a native report. Any failed patch attempt is fail-closed because an
 // incompletely restored advertise site could otherwise make the native runtime report a false maximum.
+// A complete patch reports [DLSSG] AdaMfgMaxFrames (AdaMfgCeiling), never less than the native maximum.
 unsigned int EffectiveMax(unsigned int nativeMaximum);
+
+// AdaMfgMaxFrames as this session uses it (latched at the first call; 0 = the unlocked maximum).
+int SessionMaxFramesSetting();
 
 // Cheap failure severity for per-frame consumers that must clamp or disable behavior without copying
 // the full Status (including its version string).
