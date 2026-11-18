@@ -89,7 +89,9 @@ If you changed `[Libraries] OptiDllPath`, use its `streamline` subfolder instead
 ### Game has working native FG / an external RTX 40 MFG unlocker
 
 Keep the game's working Streamline files and use the game's/external mod's controls.
-For the external unlocker, follow [RTX40-MFG.md](RTX40-MFG.md) and use `[FrameGen] External=true`.
+For an external MFG unlocker (a separate mod), use `[FrameGen] External=true`. OptiScaler's built-in
+RTX 40 unlock is different: it runs with `External=false` from the DLSS Frame Generation section, see
+[RTX40-MFG.md](RTX40-MFG.md).
 That option requires a build containing commit `a60f3c93` or later; the v0.5 release does not implement
 it. Adding this downloader to an older install does not upgrade its OptiScaler DLL.
 That mode deliberately disables OptiScaler's own FG routing, so this optional component is unused.
@@ -198,7 +200,7 @@ bug-free or guaranteed free of malware. Keep Windows Security enabled and scan d
 ## Internal mode (experimental)
 
 `[DLSSG] AmpereMfgMode=Internal` changes what the sideloaded dlssg_sm86 mod (the RTX 20/30 MFG
-unlock, `AmpereMfgUnlock=true`) does. Instead of forcing `[FrameGen] External=true` and handing MFG
+unlock: `MfgUnlock=true` on an RTX 20/30 card, or the older `AmpereMfgUnlock=true`) does. Instead of forcing `[FrameGen] External=true` and handing MFG
 control to the game, OptiScaler keeps its own DLSS FG output active, and the mod's process-wide
 `nvngx_dlssg.dll` substitution serves that Streamline-host feature with the mod's SM86/SM75 CUDA
 kernels: real DLSS-G interpolation on RTX 20/30 inside OptiScaler's FG route. This mode is
@@ -206,7 +208,8 @@ experimental and startup-only: change it, save settings, restart.
 
 Requirements:
 
-- `AmpereMfgUnlock=true` with the mod DLL at `OptiScaler\dlssg_sm86\dlssg_sm86.dll` (SilyNoMeta
+- The RTX 20/30 unlocker enabled (`MfgUnlock=true`, `MfgUnlocker=auto` or `turing-ampere`) with the mod DLL at
+  `OptiScaler\dlssg_sm86\dlssg_sm86.dll` (SilyNoMeta
   dlssg_for_sm86 build, bundled factory 310.9.1 DLSS-G runtime).
 - `[FrameGen] External=false`, `Enabled=true` and `FGOutput=dlssg`. The FG Nvngx replacement is
   forced to `None` in this mode; any replacement masquerades as `nvngx_dlssg.dll` itself and
@@ -219,7 +222,8 @@ Requirements:
 
 ```ini
 [DLSSG]
-AmpereMfgUnlock=true
+MfgUnlock=true
+MfgUnlocker=auto
 AmpereMfgMode=Internal
 InterpolationCount=1
 
@@ -250,5 +254,6 @@ when FG works, but if FG fails with no line, check the Streamline log for
 | Streamline log shows `Ignoring plugin 'sl.dlss_g'` | Set `[DLSSG] AmpereMfgSpoofArchToGame=1` and restart |
 | Architecture-gate failure persists | Send `OptiScaler\dlssg_sm86\logs` with the report |
 
-To revert, set `AmpereMfgMode=External` (or `AmpereMfgUnlock=false`), save settings and restart.
+To revert, set `AmpereMfgMode=External` (or `MfgUnlock=false` to turn the unlocker off), save settings and restart.
+Once settings are saved, `AmpereMfgUnlock` is written as `auto` and is no longer the switch.
 The default path is unaffected.
