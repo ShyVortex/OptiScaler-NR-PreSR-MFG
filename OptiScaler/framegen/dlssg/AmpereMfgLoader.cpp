@@ -530,7 +530,8 @@ void TrySetup()
     const int configuredFrames = cfg->FGDLSSGAmpereMfgMaxFrames.value_or_default();
 
     const std::string fallbackSetting = cfg->FGDLSSGAmpereMfgLinuxFsrFallback.value_or("auto");
-    const std::string fallbackType = ResolveFallbackFgType(cfg->FGDLSSGAmpereMfgLinuxFallbackType.value_or("fsrfg"));
+    const std::string fallbackType =
+        ResolveFallbackFgType(cfg->FGDLSSGAmpereMfgLinuxFallbackType.value_or(kDefaultLinuxFallbackType));
 
     s_status.Enabled = true;
 

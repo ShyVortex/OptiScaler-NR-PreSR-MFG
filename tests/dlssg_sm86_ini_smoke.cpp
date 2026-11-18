@@ -298,8 +298,12 @@ int main()
         assert(ResolveFallbackFgType("xefg") == "xefg");
         assert(ResolveFallbackFgType("XeFG") == "xefg");
         assert(ResolveFallbackFgType("XEFG") == "xefg");
-        assert(ResolveFallbackFgType("auto") == "fsrfg");
-        assert(ResolveFallbackFgType("") == "fsrfg");
+        assert(ResolveFallbackFgType("FSRFG") == "fsrfg");
+        // auto, empty and unknown text: the default, XeFG since 0.9.94
+        assert(ResolveFallbackFgType("auto") == "xefg");
+        assert(ResolveFallbackFgType("") == "xefg");
+        assert(ResolveFallbackFgType("dlssg") == "xefg");
+        assert(ResolveFallbackFgType() == "xefg");
     }
 
     assert(ResolveAutoKernelImage(0x170, "NVIDIA GeForce RTX 3060", true) == "PTX");

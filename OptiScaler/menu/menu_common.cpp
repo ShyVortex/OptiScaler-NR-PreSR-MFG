@@ -3640,8 +3640,8 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
             if (ampereFallbackToFsrFg)
             {
-                const std::string fallbackType =
-                    AmpereMfgLoader::ResolveFallbackFgType(config->FGDLSSGAmpereMfgLinuxFallbackType.value_or("fsrfg"));
+                const std::string fallbackType = AmpereMfgLoader::ResolveFallbackFgType(
+                    config->FGDLSSGAmpereMfgLinuxFallbackType.value_or(AmpereMfgLoader::kDefaultLinuxFallbackType));
                 const char* fallbackTypeName = (fallbackType == "xefg") ? "XeFG" : "FSR FG";
                 ImGui::TextColored(toneMapColor(ImVec4(0.f, 1.f, 0.25f, 1.f)), "Linux FG Fallback ON (%s)",
                                    fallbackTypeName);
@@ -3981,18 +3981,29 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                     "Force Disabled: Always uses external dlssg_sm86 mod.\n"
                     "Save Settings and restart to apply.");
 
-                const char* fallbackPipelines[] = { "FSR FG (Fast, stable, built-in)",
-                                                    "XeFG (Intel XeSS FG, requires libxess_fg.dll)" };
-                std::string currentPipeStr = config->FGDLSSGAmpereMfgLinuxFallbackType.value_or("fsrfg");
+                const char* fallbackPipelines[] = { "FSR FG (AMD FSR Frame Generation)",
+                                                    "XeFG (Intel XeSS Frame Generation, default)" };
+                const std::string currentPipeStr = AmpereMfgLoader::ResolveFallbackFgType(
+                    config->FGDLSSGAmpereMfgLinuxFallbackType.value_or(AmpereMfgLoader::kDefaultLinuxFallbackType));
                 int currentPipe = (currentPipeStr == "xefg") ? 1 : 0;
                 if (ImGui::Combo("Fallback Pipeline##sm86", &currentPipe, fallbackPipelines, 2))
                 {
                     config->FGDLSSGAmpereMfgLinuxFallbackType = (currentPipe == 1) ? "xefg" : "fsrfg";
                 }
                 ShowHelpMarker("Select internal FG pipeline used during Linux fallback:\n"
-                               "FSR FG: Recommended default. Fast, low overhead, built into OptiScaler.\n"
-                               "XeFG: Intel XeSS FG. Requires libxess_fg.dll in game folder.\n"
+                               "XeFG: Intel XeSS FG (default). Its files ship with OptiScaler.\n"
+                               "FSR FG: AMD FSR FG. Use it for games with 16-bit float HDR output, which XeFG does not "
+                               "support.\n"
                                "Save Settings and restart to apply.");
+
+                // XeFG can't take a 16-bit float HDR swapchain (XeFG_Dx12 only logs it): point to FSR FG.
+                if (ampereFallbackToFsrFg && currentPipeStr == "xefg" && state.xefgHdrFormatUnsupported)
+                {
+                    ImGui::PushStyleColor(ImGuiCol_Text, toneMapColor(ImVec4(1.f, 0.75f, 0.2f, 1.f)));
+                    StatusTextWrapped(menuScale, "This game's HDR output (16-bit float) is not supported by XeFG: "
+                                                 "set Fallback Pipeline to FSR FG, Save Settings and restart.");
+                    ImGui::PopStyleColor();
+                }
             }
         }
 
@@ -4557,8 +4568,8 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                               "External FG is active. Set the multiplier in the game or unlocker, not OptiScaler.");
         else if (ampereFallbackToFsrFg)
         {
-            const std::string fallbackType =
-                AmpereMfgLoader::ResolveFallbackFgType(config->FGDLSSGAmpereMfgLinuxFallbackType.value_or("fsrfg"));
+            const std::string fallbackType = AmpereMfgLoader::ResolveFallbackFgType(
+                config->FGDLSSGAmpereMfgLinuxFallbackType.value_or(AmpereMfgLoader::kDefaultLinuxFallbackType));
             const char* fallbackTypeName = (fallbackType == "xefg") ? "XeFG" : "FSR FG";
             StatusTextWrapped(menuScale,
                               "Linux FG Fallback is active (%s). Multiplier is controlled via Max Generated Frames "

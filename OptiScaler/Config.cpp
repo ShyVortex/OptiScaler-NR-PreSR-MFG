@@ -221,9 +221,10 @@ bool Config::Reload(std::filesystem::path iniPath)
 
             if (auto fallbackType = readString("DLSSG", "AmpereMfgLinuxFallbackType"); fallbackType.has_value())
             {
+                // Only an explicit choice is stored; anything else keeps the default (AmpereMfgLoader).
                 if (lstrcmpiA(fallbackType.value().c_str(), "xefg") == 0)
                     FGDLSSGAmpereMfgLinuxFallbackType.set_from_config("xefg");
-                else
+                else if (lstrcmpiA(fallbackType.value().c_str(), "fsrfg") == 0)
                     FGDLSSGAmpereMfgLinuxFallbackType.set_from_config("fsrfg");
             }
 
@@ -1295,7 +1296,7 @@ bool Config::SaveIni(std::filesystem::path destination)
         ini.SetValue("DLSSG", "AmpereMfgLinuxFsrFallback",
                      Instance()->FGDLSSGAmpereMfgLinuxFsrFallback.value_for_config_or("auto").c_str());
         ini.SetValue("DLSSG", "AmpereMfgLinuxFallbackType",
-                     Instance()->FGDLSSGAmpereMfgLinuxFallbackType.value_for_config_or("fsrfg").c_str());
+                     Instance()->FGDLSSGAmpereMfgLinuxFallbackType.value_for_config_or("auto").c_str());
         ini.SetValue("DLSSG", "AmpereMfgBlockGameXeFG",
                      GetBoolValue(Instance()->FGDLSSGAmpereMfgBlockGameXeFG.value_for_config()).c_str());
         ini.SetValue("DLSSG", "SmoothMotion", GetBoolValue(Instance()->FGDLSSGSmoothMotion.value_for_config()).c_str());

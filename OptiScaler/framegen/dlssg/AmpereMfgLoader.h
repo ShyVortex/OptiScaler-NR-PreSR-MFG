@@ -132,12 +132,21 @@ inline bool ShouldFallbackToFsrFg(int configuredMaxFrames, bool onLinux, bool mf
     return (configuredMaxFrames <= 1);
 }
 
-/// Resolves the fallback pipeline type string ("fsrfg" or "xefg")
-inline std::string ResolveFallbackFgType(const std::string& fallbackType = "fsrfg")
+/// Default pipeline of the Linux fallback ([DLSSG] AmpereMfgLinuxFallbackType unset or auto). XeFG since 0.9.94:
+/// libxess_fg.dll / libxell.dll ship in OptiScaler\ and are preloaded outside External mode, and its vkd3d-proton
+/// pacing and Wine swapchain-init problems are fixed. FSR FG stays selectable (it also handles R16G16B16A16 HDR).
+inline constexpr const char* kDefaultLinuxFallbackType = "xefg";
+
+/// Resolves the fallback pipeline type string ("fsrfg" or "xefg"). auto, empty or unknown text: the default.
+inline std::string ResolveFallbackFgType(const std::string& fallbackType = kDefaultLinuxFallbackType)
 {
-    if (fallbackType == "xefg" || fallbackType == "XeFG" || fallbackType == "XEFG")
-        return "xefg";
-    return "fsrfg";
+    std::string lower = fallbackType;
+    for (auto& c : lower)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+    if (lower == "xefg" || lower == "fsrfg")
+        return lower;
+    return kDefaultLinuxFallbackType;
 }
 
 constexpr uint32_t DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID = 0x104D6667;

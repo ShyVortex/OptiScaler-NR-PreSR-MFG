@@ -123,6 +123,29 @@
 - **Labels** stay neutral, matching MFG Unlocker's documentation: A and B are NVIDIA's original FG models, C is its
   performance mode. The UI-recomposition meanings belong to sdli1995's runtime options only.
 
+### 4.5 Linux 2X fallback: XeFG by default (after 0.9.94-pre1)
+- **Request.** The maintainer confirmed RTX 20/30 on Windows and Linux in 0.9.94-pre1 and asked for XeFG instead of
+  FSR FG as the default `AmpereMfgLinuxFallbackType`.
+- **Why FSR FG was the default.** `23c1df38` chose it as "fast & stable, zero extra DLLs", with XeFG needing
+  `libxess_fg.dll`. That reason is gone:
+  - `package_release.ps1` stages `libxess_fg.dll` / `libxell.dll` in `OptiScaler\`;
+  - a fallback session is not External, so `CheckMemoryForProxies` preloads them (after the External decision);
+  - XeFG's Linux problems are fixed: `FG-OPTIFG-XEFG-FRAMETIME-AND-PACING.md` (vkd3d-proton pacing),
+    `FG-XEMFG-SWAPCHAIN-INIT-INVALID-ARGUMENT.md` (Ampere under Wine) and rule §9 (Metro 2033 Redux on Proton).
+- **Nothing lost in coverage:** both outputs are DX12 only (`FSRFG_Dx12`, `XeFG_Dx12`), and both stay 2X here, because
+  XeMFG is off while the RTX 20/30 unlocker is active.
+- **Change:**
+  - `AmpereMfgLoader::kDefaultLinuxFallbackType = "xefg"` replaces the six `"fsrfg"` defaults;
+  - `auto`, empty or unknown text resolve to it, and Save writes `auto` when nothing was chosen;
+  - an explicit `fsrfg` is still the user's choice. Older builds always saved `fsrfg`, so those installs keep FSR FG
+    (the maintainer chose not to migrate them).
+- **HDR.** XeFG has no `R16G16B16A16_FLOAT` support. During the fallback the menu then asks for FSR FG under the
+  "Fallback Pipeline" combo (`state.xefgHdrFormatUnsupported`).
+- **Still to check in game:** the OptiScaler FPS limit with XeFG under Linux. It is covered by unit tests only
+  (rule §8).
+- **Tests:** `tests/linux_fallback_xefg_default_unit.cpp` (14 checks). `tests/dlssg_sm86_ini_smoke.cpp` expects `xefg`
+  for auto, empty and unknown text.
+
 ## 5. RTX 40 and the Architecture Spoof (`93f7e89a`, no code change)
 - **RTX 20/30.** Streamline refuses the DLSS-G plugin below Ada ("Ignoring plugin 'sl.dlss_g'"). So the RTX 20/30
   unlocker spoofs the plugin load (`ampereMfgActive` in `hkdlssg_slOnPluginLoad`), and sdli1995's `SpoofArchToGame`

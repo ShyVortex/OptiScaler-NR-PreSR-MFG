@@ -2053,8 +2053,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
             auto* cfg = Config::Instance();
             cfg->FGEnabled.set_volatile_value(true);
             cfg->FGInput.set_volatile_value(FGInput::DLSSG);
-            const std::string fallbackType =
-                AmpereMfgLoader::ResolveFallbackFgType(cfg->FGDLSSGAmpereMfgLinuxFallbackType.value_or("fsrfg"));
+            const std::string fallbackType = AmpereMfgLoader::ResolveFallbackFgType(
+                cfg->FGDLSSGAmpereMfgLinuxFallbackType.value_or(AmpereMfgLoader::kDefaultLinuxFallbackType));
             if (fallbackType == "xefg")
                 cfg->FGOutput.set_volatile_value(FGOutput::XeFG);
             else
