@@ -279,7 +279,7 @@ if ($on) {
 }
 Write-Host "ini verified: nothing switched on by default"
 
-foreach ($key in @('FinishedPicture', 'DeferredDLSS', 'ResidualFG', 'ResidualFGApproxCamera', 'UnlockPasses', 'AmpereMfgUnlock')) {
+foreach ($key in @('FinishedPicture', 'DeferredDLSS', 'ResidualFG', 'ResidualFGApproxCamera', 'UnlockPasses', 'AmpereMfgUnlock', 'AdaMfgUnlock', 'MfgUnlock')) {
     if ($ini -match "(?mi)^$key=true\s*$") {
         throw "REFUSING: experimental option $key is enabled in the portable package"
     }

@@ -673,6 +673,11 @@ class Config
     // Frame Generation
     CustomOptional<FGInput> FGInput { FGInput::NoFG };
     CustomOptional<bool> ExternalFrameGeneration { false };
+    // [DLSSG] MfgUnlock + MfgUnlocker (auto / ada / turing-ampere): the one switch for the DLSS FG/MFG unlockers.
+    // Config load resolves them (MfgUnlockerSelect) into FGDLSSGAdaMfgUnlock / FGDLSSGAmpereMfgUnlock below, which
+    // every unlocker gate keeps reading. Without MfgUnlock the legacy AdaMfgUnlock / AmpereMfgUnlock keys decide.
+    CustomOptional<bool> FGDLSSGMfgUnlock { false };
+    CustomOptional<std::string, NoDefault> FGDLSSGMfgUnlocker; // canonical: auto / ada / turing-ampere
     CustomOptional<bool> FGDLSSGAdaMfgUnlock { false };
     CustomOptional<bool> FGDLSSGAdaBlackwellKernels { true };
     // Ampere/Turing (SM86/SM75) MFG unlocker — sideloads the dlssg_for_sm86 proxy
