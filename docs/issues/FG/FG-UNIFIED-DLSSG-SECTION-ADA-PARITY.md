@@ -191,4 +191,7 @@
     menu line "FG preset B applied". Without that line, DLSS-G did not read the preset through the hooked
     `NvAPI_DRS_GetSetting`: the preset needs another route.
 - **No NVIDIA GPU and RTX 50:** the section must show locked.
-- The architecture rules and `.agents/CONTEXT.md` are updated only after these confirmations (workflow rule §8).
+- **Status (2026-11-20).** RTX 20/30 confirmed unchanged on Windows and Linux (0.9.94-pre1). No RTX 40 tester has
+  reported back; the maintainer accepted the refactor as complete without that report. The RTX 40 checks above, the
+  section lock on no-NVIDIA / RTX 50 and the Linux XeFG fallback checks remain open and should be closed when a report
+  arrives. Rule §4 and `.agents/CONTEXT.md` record the invariants with that caveat.

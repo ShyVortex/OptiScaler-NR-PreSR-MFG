@@ -5,6 +5,13 @@ OptiScaler is a Windows x64 DLL proxy (dxgi.dll / d3d12.dll / version.dll etc.) 
 
 ## Key Architecture for Ampere MFG Unlocker Integration
 
+### Unified DLSS MFG Unlocker Switch (0.9.94)
+- One switch picks the unlocker for the GPU: `[DLSSG] MfgUnlock` + `MfgUnlocker` (`auto` / `ada` / `turing-ampere`). Legacy `AdaMfgUnlock` / `AmpereMfgUnlock` are still read while `MfgUnlock=auto` and saved as `auto`.
+- Resolved at the first config load in `DllMain` (External FG is decided there, before IdentifyGpu) from PCI ids: `misc/EarlyGpuArch` (D3DKMT, then the `Enum\PCI` registry, which Wine fills in). Pure rules: `framegen/dlssg/MfgUnlockerSelect.h`. The result writes the existing `FGDLSSGAdaMfgUnlock` / `FGDLSSGAmpereMfgUnlock` flags, so every downstream gate is unchanged.
+- Menu: one `"DLSS Multi-Frame Generation (MFG)"` collapsing header (`menu/MfgSectionPolicy.h`) with an "Unlocker" combo and an RTX 40 or RTX 20/30 sub-block. Locked without an NVIDIA GPU, on RTX 50 and on older cards.
+- RTX 40 options: `AdaMfgMaxFrames` (ceiling, only via `MfgUnlock::EffectiveMax`, `AdaMfgCeiling.h`) and `AdaMfgPreset` (DRS answer for `0x10E41DF1` in `hkNvAPI_DRS_GetSetting`, `DlssgPresetPolicy.h`). Both latched per session. No RTX 40 in-game report yet; the preset route is unconfirmed.
+- RTX 20/30 verified unchanged in-game on Windows and Linux. Rule §4 has the invariants; doc `docs/issues/FG/FG-UNIFIED-DLSSG-SECTION-ADA-PARITY.md`.
+
 ### Existing Ada MFG Unlocker Pattern
 The Ada (RTX 40) MFG unlocker is the reference pattern. It lives in:
 - **Config**: `Config.h` L807-808 (`FGDLSSGAdaMfgUnlock`, `FGDLSSGAdaBlackwellKernels`)
@@ -12,7 +19,7 @@ The Ada (RTX 40) MFG unlocker is the reference pattern. It lives in:
 - **Config save**: `Config.cpp` L978-979
 - **INI**: `OptiScaler.ini` L280-286 under `[DLSSG]`
 - **Logic**: `framegen/dlssg/MfgUnlock.h/cpp` — patches nvngx_dlssg.dll in-memory
-- **Menu**: `menu/menu_common.cpp` L3076-3090 — checkbox + status display
+- **Menu**: `menu/menu_common.cpp`, RTX 40 sub-block of the "DLSS Multi-Frame Generation (MFG)" section (Blackwell kernels, ceiling, preset, status)
 - **Hooks**: `hooks/LibraryLoad_Hooks.cpp` L122 and `hooks/Streamline_Hooks.cpp` L1152,1220 — calls `TryApply()`
 - **Consumers**: `hooks/Streamline_Hooks.cpp` and `framegen/dlssg/DLSSG_Dx12.cpp` use `UnlockedMax()` and `Pending()`
 
@@ -37,8 +44,7 @@ The mod by sdli1995 is a **standalone DLL proxy** (`version.dll` + `dlssg_sm86.i
    - `GenerateIniContent()` creates dynamic `dlssg_sm86.ini` matching upstream format.
    - `TrySetup()` guards against non-Ampere GPUs (`NV_GPU_ARCHITECTURE_GA100` / `0x170`), Ada mutual exclusion, locates DLL in `dlssg_sm86/`, writes INI beside DLL, and calls `LoadLibrary`.
 3. **Menu UI** (`menu/menu_common.cpp`):
-   - Collapsible header `"RTX 30 (Ampere SM86) MFG Unlock"`.
-   - Toggle checkbox with mutual exclusion (greyed out if Ada is active, and vice versa).
+   - RTX 20 / 30 sub-block of the `"DLSS Multi-Frame Generation (MFG)"` section; the shared switch and "Unlocker" combo replace the old separate checkboxes.
    - Live status display (`DLL: found | INI: written | Loaded: yes/no` or red error).
    - `MaxGeneratedFrames##sm86` slider (0–3 with descriptive labels).
    - `KernelImage##sm86` combo dropdown (`Auto`, `PTX`, `Cubin`).
@@ -87,7 +93,7 @@ The mod by sdli1995 is a **standalone DLL proxy** (`version.dll` + `dlssg_sm86.i
 - **Upstream Repository**: `https://github.com/wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass.git` (remote: `upstream`)
 - **Divergence Context**:
   - After initially accepting PR #23 containing the SM75/SM86 MFG unlocker, upstream author `wilsjo2` excluded both the SM75-SM86 mod component and the Ada (RTX 40) MFG unlocker in later commits/branches (around v0.8.0–v0.8.3) due to NVIDIA DMCA concerns.
-  - This repository (`ShyVortex/OptiScaler-NR-PreSR-MFG`, renamed from `ShyVortex/OptiScaler-DLSSNR-PreSR-Multipass`; older docs use the old name) explicitly maintains and supports both MFG unlockers: the Turing (SM75) and Ampere (SM86) MFG unlocker with the Linux 2X FG FSR Fallback pipeline, and the Ada (RTX 40) MFG unlocker (always compiled via `OptiScalerRtx40Mfg=true`).
+  - This repository (`ShyVortex/OptiScaler-NR-PreSR-MFG`, renamed from `ShyVortex/OptiScaler-DLSSNR-PreSR-Multipass`; older docs use the old name) explicitly maintains and supports both MFG unlockers: the Turing (SM75) and Ampere (SM86) MFG unlocker with the Linux 2X FG fallback pipeline (XeFG by default since 0.9.94-pre2, FSR FG selectable), and the Ada (RTX 40) MFG unlocker (always compiled via `OptiScalerRtx40Mfg=true`).
 
 ### Permanent Multi-Branch Architecture
 To safely manage upstream merges and mod evolution, three permanent branches are established:
