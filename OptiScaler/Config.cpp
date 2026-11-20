@@ -7,6 +7,8 @@
 #include "nvapi/fakenvapi.h"
 #include <hooks/Streamline_Hooks.h>
 #include <misc/IdentifyGpu.h>
+#include <misc/EarlyGpuArch.h>
+#include <framegen/dlssg/DlssgPresetPolicy.h>
 
 #include <SimpleIni.h>
 
@@ -69,9 +71,43 @@ bool Config::Reload(std::filesystem::path iniPath)
         {
             FGEnabled.set_from_config(readBool("FrameGen", "Enabled"));
             ExternalFrameGeneration.set_from_config(readBool("FrameGen", "External"));
-            FGDLSSGAdaMfgUnlock.set_from_config(readBool("DLSSG", "AdaMfgUnlock"));
+            // One switch for the DLSS FG/MFG unlockers. The resolved owner sets the flags every unlocker gate reads;
+            // without MfgUnlock, the legacy AdaMfgUnlock / AmpereMfgUnlock keys decide (migration).
+            {
+                const auto mfgUnlock = readBool("DLSSG", "MfgUnlock");
+                std::optional<MfgUnlockerSelect::Choice> choice;
+                if (auto text = readString("DLSSG", "MfgUnlocker"); text.has_value())
+                    choice = MfgUnlockerSelect::ParseChoice(text.value());
+
+                const auto request = MfgUnlockerSelect::FromIni(mfgUnlock, choice, readBool("DLSSG", "AdaMfgUnlock"),
+                                                                readBool("DLSSG", "AmpereMfgUnlock"));
+                const auto& early = EarlyGpuArch::Get();
+                const auto resolution = MfgUnlockerSelect::Resolve(request.enabled, request.choice, early.arch);
+
+                FGDLSSGMfgUnlock.set_from_config(request.enabled);
+                FGDLSSGMfgUnlocker.set_from_config(std::string(MfgUnlockerSelect::ChoiceName(request.choice)));
+                FGDLSSGAdaMfgUnlock.set_from_config(resolution.owner == MfgUnlockerSelect::Owner::Ada);
+                FGDLSSGAmpereMfgUnlock.set_from_config(resolution.owner == MfgUnlockerSelect::Owner::TuringAmpere);
+
+                // Startup-only, like the flags (set_from_config keeps the first value): a reload doesn't change it.
+                static bool resolutionRecorded = false;
+                if (!resolutionRecorded)
+                {
+                    resolutionRecorded = true;
+                    State::Instance().mfgUnlocker = resolution;
+                    State::Instance().mfgUnlockerArchSource = early.source;
+                }
+            }
             FGDLSSGAdaBlackwellKernels.set_from_config(readBool("DLSSG", "AdaBlackwellKernels"));
-            FGDLSSGAmpereMfgUnlock.set_from_config(readBool("DLSSG", "AmpereMfgUnlock"));
+            FGDLSSGAdaMfgMaxFrames.set_from_config(readInt("DLSSG", "AdaMfgMaxFrames"));
+            if (FGDLSSGAdaMfgMaxFrames.has_value() &&
+                (FGDLSSGAdaMfgMaxFrames.value() < 0 || FGDLSSGAdaMfgMaxFrames.value() > 5))
+                FGDLSSGAdaMfgMaxFrames.reset();
+            if (auto adaPreset = readString("DLSSG", "AdaMfgPreset"); adaPreset.has_value())
+            {
+                if (const auto parsed = DlssgPresetPolicy::Parse(adaPreset.value()); parsed.has_value())
+                    FGDLSSGAdaMfgPreset.set_from_config(std::string(DlssgPresetPolicy::Name(parsed.value())));
+            }
             if (auto ampereMode = readString("DLSSG", "AmpereMfgMode"); ampereMode.has_value())
             {
                 if (lstrcmpiA(ampereMode.value().c_str(), "internal") == 0)
@@ -185,9 +221,10 @@ bool Config::Reload(std::filesystem::path iniPath)
 
             if (auto fallbackType = readString("DLSSG", "AmpereMfgLinuxFallbackType"); fallbackType.has_value())
             {
+                // Only an explicit choice is stored; anything else keeps the default (AmpereMfgLoader).
                 if (lstrcmpiA(fallbackType.value().c_str(), "xefg") == 0)
                     FGDLSSGAmpereMfgLinuxFallbackType.set_from_config("xefg");
-                else
+                else if (lstrcmpiA(fallbackType.value().c_str(), "fsrfg") == 0)
                     FGDLSSGAmpereMfgLinuxFallbackType.set_from_config("fsrfg");
             }
 
@@ -1219,10 +1256,25 @@ bool Config::SaveIni(std::filesystem::path destination)
                                   (ampereUnlock &&
                                    Instance()->FGDLSSGAmpereMfgMode.value_for_config_or("External") != "Internal"))
                          .c_str());
-        ini.SetValue("DLSSG", "AdaMfgUnlock", GetBoolValue(adaUnlock).c_str());
+        {
+            const auto storedChoice = MfgUnlockerSelect::ParseChoice(Instance()->FGDLSSGMfgUnlocker.value_or("auto"))
+                                          .value_or(MfgUnlockerSelect::Choice::Auto);
+            const auto& session = State::Instance().mfgUnlocker;
+            const auto saved =
+                MfgUnlockerSelect::ToSaved(adaUnlock, ampereUnlock, Instance()->FGDLSSGMfgUnlock.value_or_default(),
+                                           storedChoice, session.owner, session.arch);
+
+            ini.SetValue("DLSSG", "MfgUnlock", saved.enabled ? "true" : "auto");
+            ini.SetValue("DLSSG", "MfgUnlocker", MfgUnlockerSelect::ChoiceName(saved.choice));
+            // Legacy keys: read only while MfgUnlock is auto, so they are written back as auto.
+            ini.SetValue("DLSSG", "AdaMfgUnlock", "auto");
+            ini.SetValue("DLSSG", "AmpereMfgUnlock", "auto");
+        }
         ini.SetValue("DLSSG", "AdaBlackwellKernels",
                      GetBoolValue(Instance()->FGDLSSGAdaBlackwellKernels.value_for_config()).c_str());
-        ini.SetValue("DLSSG", "AmpereMfgUnlock", GetBoolValue(ampereUnlock).c_str());
+        ini.SetValue("DLSSG", "AdaMfgMaxFrames",
+                     GetIntValue(Instance()->FGDLSSGAdaMfgMaxFrames.value_for_config()).c_str());
+        ini.SetValue("DLSSG", "AdaMfgPreset", Instance()->FGDLSSGAdaMfgPreset.value_for_config_or("auto").c_str());
         ini.SetValue("DLSSG", "AmpereMfgMode",
                      Instance()->FGDLSSGAmpereMfgMode.value_for_config_or("External").c_str());
         ini.SetValue("DLSSG", "AmpereMfgMaxFrames",
@@ -1244,7 +1296,7 @@ bool Config::SaveIni(std::filesystem::path destination)
         ini.SetValue("DLSSG", "AmpereMfgLinuxFsrFallback",
                      Instance()->FGDLSSGAmpereMfgLinuxFsrFallback.value_for_config_or("auto").c_str());
         ini.SetValue("DLSSG", "AmpereMfgLinuxFallbackType",
-                     Instance()->FGDLSSGAmpereMfgLinuxFallbackType.value_for_config_or("fsrfg").c_str());
+                     Instance()->FGDLSSGAmpereMfgLinuxFallbackType.value_for_config_or("auto").c_str());
         ini.SetValue("DLSSG", "AmpereMfgBlockGameXeFG",
                      GetBoolValue(Instance()->FGDLSSGAmpereMfgBlockGameXeFG.value_for_config()).c_str());
         ini.SetValue("DLSSG", "SmoothMotion", GetBoolValue(Instance()->FGDLSSGSmoothMotion.value_for_config()).c_str());

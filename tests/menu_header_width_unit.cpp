@@ -111,7 +111,7 @@ static FrameResult Frame(float scale, bool longLine, bool openWideSection)
                 ScopedCollapsingHeader section("Advanced DLSS Settings");
             }
             {
-                ScopedCollapsingHeader section("RTX 20 / 30 (SM75 / SM86) MFG Unlock");
+                ScopedCollapsingHeader section("DLSS Multi-Frame Generation (MFG)");
             }
             if (g_probe)
                 MenuWidthProbe::MarkMenuSection("Upscalers");

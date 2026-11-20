@@ -1,39 +1,58 @@
-# v0.8.0 with RTX 40 MFG
+# RTX 40 MFG Unlock
 
-This branch retains the built-in Ada unlock as an optional build feature. Both builds include the Starfield tracking fix. The unlock is compiled into OptiScaler: no extra helper, ASI loader or external-FG mode is needed.
+The built-in RTX 40 (Ada) MFG unlock is compiled into OptiScaler: no extra helper, ASI loader or External FG mode is
+needed. It is one of the two unlockers of the in-game **DLSS Multi-Frame Generation (MFG)** section; the other is the RTX 20/30
+unlocker (sdli1995 `dlssg_for_sm86`).
 
 ## Build
 
-The default build excludes the unlock implementation, hooks, capability overrides, menu and configuration field. Ordinary DLSS FG/MFG remains available. Legacy `AdaMfgUnlock` settings are ignored and removed on save.
+The build flag `OptiScalerRtx40Mfg` defaults to `true` in `OptiScaler.vcxproj` and defines `OPTISCALER_RTX40_MFG`
+(architecture rule §4). A build with `/p:OptiScalerRtx40Mfg=false` leaves out the unlock implementation, hooks,
+capability overrides and its menu block; the DLSS Multi-Frame Generation (MFG) section then greys out the RTX 40 entry. Ordinary
+DLSS FG/MFG remains available.
 
 ```powershell
-# Without the unlock (default)
-MSBuild OptiScaler.sln /p:Configuration=Release /p:Platform=x64 /p:OptiScalerRtx40Mfg=false
-./package_release.ps1 -Version nr-standard
+# Default: the unlock is compiled in
+MSBuild OptiScaler.sln /p:Configuration=Release /p:Platform=x64
 
-# Compile the optional unlock
-MSBuild OptiScaler.sln /p:Configuration=Release /p:Platform=x64 /p:OptiScalerRtx40Mfg=true
-./package_release.ps1 -Version nr-rtx40-mfg -EnableRtx40Mfg
+# Without the unlock
+MSBuild OptiScaler.sln /p:Configuration=Release /p:Platform=x64 /p:OptiScalerRtx40Mfg=false
 ```
 
-Enabled builds use `x64/Release-RTX40-MFG`; standard builds use `x64/Release`. Separate intermediate folders prevent mixing objects/PCH files. Packaging checks the DLL flavour even with `-SkipBuild` and omits the unlock INI default for standard packages.
-
-`OptiScalerRtx40Mfg=true` defines `OPTISCALER_RTX40_MFG`. The runtime toggle still defaults off. Keeping the restoration/build-flag commits separate lets upstream reviews omit their source changes too: a disabled build flag alone does not remove them from a PR diff.
+Enabled builds use `x64/Release-RTX40-MFG`; standard builds use `x64/Release`. Separate intermediate folders prevent
+mixing objects/PCH files. The runtime switch still defaults off.
 
 ## Enable at runtime
 
-1. Install the complete **unlock-enabled** package, preserving your INI and separately supplied NR runtime.
-2. Under frame-generation settings in the OptiScaler in-game overlay (or `OptiScaler.ini`), configure:
-   - `[DLSSG] AdaMfgUnlock = true`: Unlocks the 3X–6X Multi-Frame Generation multipliers.
-   - `[DLSSG] AdaBlackwellKernels = true`: Retargets NVIDIA's Blackwell (`sm_120`) PTX interpolation kernels in `nvngx_dlssg.dll` to Ada (`sm_89`). **Recommended for 3X–6X generation** to eliminate frame pacing micro-stutter.
-   - Save Settings and restart the game.
-3. Enable the game's DLSS FG or configure OptiScaler's normal DLSSG output. Select 3X or 4X and verify smoothness.
+1. In the OptiScaler overlay, open **DLSS Multi-Frame Generation (MFG)**, tick **Enable DLSS FG / MFG unlocker** and leave
+   **Unlocker** on **Auto**: on an RTX 40 card it shows "Auto (RTX 40 unlock on this GPU)". In `OptiScaler.ini`:
+
+   ```ini
+   [DLSSG]
+   MfgUnlock=true
+   MfgUnlocker=auto
+   ```
+
+   The older `AdaMfgUnlock=true` still works while `MfgUnlock=auto`; saving settings writes the new keys.
+2. The RTX 40 options sit under **RTX 40 (Ada)** in the same section:
+   - **Retarget Blackwell kernels** (`AdaBlackwellKernels`, default on): retargets NVIDIA's Blackwell (`sm_120`) PTX
+     interpolation kernels in `nvngx_dlssg.dll` to Ada (`sm_89`). **Recommended for 3X–6X generation** to eliminate
+     frame pacing micro-stutter.
+   - **Max Multiplier Ceiling** (`AdaMfgMaxFrames`, 0 = up to 6X, 1 = 2X … 5 = 6X): the highest multiplier offered to
+     the game. The game's own setting still picks the multiplier. At 1 the game hides its 3X+ options.
+   - **FG Preset** (`AdaMfgPreset`: auto, a, b, c): the DLSS Frame Generation preset, answered to the game's NVIDIA
+     driver profile read for this game only. A and B are NVIDIA's original frame generation models; C is its
+     performance mode and needs DLSS-G 310.9.16 or newer. The menu shows when the preset was applied.
+   - Save Settings and restart the game after any change.
+3. The unlock runs only while OptiScaler owns DLSS-G: keep `[FrameGen] External=false`. Enable the game's DLSS FG or
+   configure OptiScaler's normal DLSSG output. Select 3X or 4X and verify smoothness.
 
 The option defaults off and only patches RTX 40/Ada. It requires a supported NVIDIA DLSSG runtime (such as v310.9); game multiplier overrides need Streamline 2.7.1+. Keep the game's working runtime. This package does not include NVIDIA FG/NR DLLs or an external MFG unlocker.
 
 The patch retargets compatible Blackwell interpolation kernels for Ada and changes two frame-count gates in memory. It exposes up to five generated frames (6X including the real frame) only when both gates and a kernel group match. Unknown/ambiguous signatures remain unchanged. Disabling also requires a restart; it does not undo a live patch.
 
-RTX 20/30 series should use OptiScaler's dedicated **Ampere/Turing (SM86/SM75) MFG Unlock** (`AmpereMfgUnlock=true`) instead.
+On RTX 20/30, **Auto** picks the RTX 20/30 unlocker instead (sdli1995 `dlssg_for_sm86`, External FG mode). RTX 50
+runs MFG natively, and the section is locked there.
 
 ## Frame Pacing, High-Refresh Displays & 3X+ Multi-Frame Generation
 

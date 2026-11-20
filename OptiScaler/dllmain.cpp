@@ -52,6 +52,7 @@
 #include <magic_enum.hpp>
 #include <version_check.h>
 #include <misc/IdentifyGpu.h>
+#include <misc/EarlyGpuArch.h>
 #include <dlssnr/DlssNr_DriverGate.h>
 #include <sha1/sha1.hpp>
 
@@ -1747,6 +1748,33 @@ DWORD WINAPI getGpuInfo(LPVOID hModuleVoid)
 {
     auto primaryGpu = IdentifyGpu::getPrimaryGpu();
 
+    // DLSS FG/MFG unlocker: the choice was made at config load from PCI ids (EarlyGpuArch). Log it, and check it
+    // against the family IdentifyGpu reports now; each unlocker still checks the architecture itself before patching.
+    {
+        auto& state = State::Instance();
+        const auto& unlocker = state.mfgUnlocker;
+        std::string adapters;
+        for (const auto& adapter : EarlyGpuArch::Get().adapters)
+            adapters += std::format("{}{:04X}:{:04X}", adapters.empty() ? "" : " ", adapter.vendorId, adapter.deviceId);
+
+        LOG_INFO("DLSS FG unlocker: enabled={} choice={} arch={} (source {}, adapters [{}]) -> {}", unlocker.enabled,
+                 MfgUnlockerSelect::ChoiceName(unlocker.choice), MfgUnlockerSelect::ArchName(unlocker.arch),
+                 state.mfgUnlockerArchSource, adapters, unlocker.reason);
+
+        if (primaryGpu.vendorId == VendorId::Nvidia)
+        {
+            const auto reported = MfgUnlockerSelect::FromNvapiArchitecture(
+                static_cast<uint32_t>(primaryGpu.nvidiaArchInfo.architecture_id));
+            if (unlocker.arch != MfgUnlockerSelect::NvArch::Unknown && reported != unlocker.arch)
+            {
+                state.mfgUnlockerArchMismatch = true;
+                LOG_WARN("DLSS FG unlocker: startup detection found {}, but the primary GPU ({}) is {}",
+                         MfgUnlockerSelect::ArchName(unlocker.arch), primaryGpu.name,
+                         MfgUnlockerSelect::ArchName(reported));
+            }
+        }
+    }
+
     // NR needs driver 610.88+ on Windows (616.64+ recommended). A volatile off keeps every NR path disabled
     // without rewriting the user's INI, and survives profile reloads (set_from_config never replaces a value
     // that is already set).
@@ -2025,8 +2053,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
             auto* cfg = Config::Instance();
             cfg->FGEnabled.set_volatile_value(true);
             cfg->FGInput.set_volatile_value(FGInput::DLSSG);
-            const std::string fallbackType =
-                AmpereMfgLoader::ResolveFallbackFgType(cfg->FGDLSSGAmpereMfgLinuxFallbackType.value_or("fsrfg"));
+            const std::string fallbackType = AmpereMfgLoader::ResolveFallbackFgType(
+                cfg->FGDLSSGAmpereMfgLinuxFallbackType.value_or(AmpereMfgLoader::kDefaultLinuxFallbackType));
             if (fallbackType == "xefg")
                 cfg->FGOutput.set_volatile_value(FGOutput::XeFG);
             else

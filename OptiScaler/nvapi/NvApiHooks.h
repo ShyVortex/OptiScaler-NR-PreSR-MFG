@@ -1,9 +1,12 @@
-#pragma once
+﻿#pragma once
 
 #include <hooks/Reflex_Hooks.h>
 
 #include "NvApiTypes.h"
 #include "fakenvapi.h"
+
+#include <atomic>
+#include <cstdint>
 
 class NvApiHooks
 {
@@ -26,6 +29,11 @@ class NvApiHooks
     static constexpr NvU32 NVDRS_SETTING_SMOOTH_MOTION_APIS = 0xB0CC0875;
     static constexpr NvU32 NVDRS_SETTING_SMOOTH_MOTION_DEBUG = 0xB01B8B02;
     static constexpr NvU32 MIN_SMOOTH_MOTION_DRIVER_VERSION = 57186;
+
+    // RTX 40 unlock FG preset (DlssgPresetPolicy): DLSS-G's reads of the preset key, and the value last answered
+    // (0 = none answered, the driver's value stood).
+    inline static std::atomic<uint32_t> dlssgPresetReads { 0 };
+    inline static std::atomic<uint32_t> dlssgPresetAnswered { 0 };
 
     static bool ApplySmoothMotionDrs(bool enable);
     static void Hook(HMODULE nvapiModule);

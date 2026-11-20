@@ -196,8 +196,7 @@ int main()
             std::string::npos);
         const auto fg =
             menu.substr(menu.find("voidMenuCommon::RenderFrameGenerationSelection(RenderMenuContext&ctx){"));
-        for (const char* mark :
-             { "FG:ownership", "FG:RTX40unlock", "FG:RTX20/30unlock", "FG:XeMFG", "FG:SmoothMotion" })
+        for (const char* mark : { "FG:ownership", "FG:DLSSMFGunlocker", "FG:XeMFG", "FG:SmoothMotion" })
             assert(fg.find(std::string("MarkMenuSection(\"") + mark + "\");") != std::string::npos);
         assert(menu.find("RenderMainMenuBottomBar(ctx);LogMenuWidthIfWide(menuResScale);") != std::string::npos);
         assert(menu.find("if(!report.streak.Update(MenuLayout::ExceedsWidth(contentWidth,available),120))return;") !=

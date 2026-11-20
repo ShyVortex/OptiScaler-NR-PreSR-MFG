@@ -4,6 +4,8 @@
 #if defined(OPTISCALER_RTX40_MFG)
 
 #include "MfgUnlock.h"
+#include "AdaMfgCeiling.h"
+#include "DlssgPresetPolicy.h"
 
 #include <Config.h>
 #include <State.h>
@@ -497,14 +499,30 @@ unsigned int MfgUnlock::UnlockedMax()
     return status.AdvertiseMatched && status.ValidateMatched && !status.PatchFailed ? kMaxGeneratedFrames : 0;
 }
 
+int MfgUnlock::SessionMaxFramesSetting()
+{
+    // Latched like EnabledForSession: the game learns the capability once, so a live change would contradict it.
+    static const int setting = Config::Instance()->FGDLSSGAdaMfgMaxFrames.value_or_default();
+    return setting;
+}
+
+uint32_t MfgUnlock::SessionPreset()
+{
+    // DLSS-G reads its preset when frame generation starts; a menu change applies on the next start.
+    static const uint32_t preset =
+        static_cast<uint32_t>(DlssgPresetPolicy::Parse(Config::Instance()->FGDLSSGAdaMfgPreset.value_or("auto"))
+                                  .value_or(DlssgPresetPolicy::Preset::Auto));
+    return preset;
+}
+
 unsigned int MfgUnlock::EffectiveMax(unsigned int nativeMaximum)
 {
-    std::lock_guard lock(g_mutex);
-    if (g_status.PatchFailed)
-        return 1;
+    static_assert(AdaMfgCeiling::kUnlockedFrames == kMaxGeneratedFrames);
+    const int ceiling = SessionMaxFramesSetting();
 
-    const unsigned int verified = g_status.AdvertiseMatched && g_status.ValidateMatched ? kMaxGeneratedFrames : 0;
-    return std::max(nativeMaximum, verified);
+    std::lock_guard lock(g_mutex);
+    return AdaMfgCeiling::Effective(nativeMaximum, g_status.PatchFailed,
+                                    g_status.AdvertiseMatched && g_status.ValidateMatched, ceiling);
 }
 
 MfgUnlock::Failure MfgUnlock::LastFailure()

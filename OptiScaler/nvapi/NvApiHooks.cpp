@@ -2,6 +2,10 @@
 #include "NvApiHooks.h"
 #include <NvApiDriverSettings.h>
 #include <framegen/dlssg/AmpereMfgLoader.h>
+#include <framegen/dlssg/DlssgPresetPolicy.h>
+#if defined(OPTISCALER_RTX40_MFG)
+#include <framegen/dlssg/MfgUnlock.h>
+#endif
 
 #include "State.h"
 #include <Config.h>
@@ -20,6 +24,7 @@
 
 #include <Util.h>
 #include <intrin.h>
+#include <cstring>
 
 #pragma intrinsic(_ReturnAddress)
 
@@ -136,6 +141,58 @@ NvAPI_Status __stdcall NvApiHooks::hkNvAPI_GPU_GetArchInfo(NvPhysicalGpuHandle h
     return status;
 }
 
+#if defined(OPTISCALER_RTX40_MFG)
+// RTX 40 unlock FG preset: answers DLSS-G's read of the preset key for this process only (DlssgPresetPolicy.h).
+static NvAPI_Status AnswerDlssgPreset(NvAPI_Status result, NVDRS_SETTING* pSetting)
+{
+    NvApiHooks::dlssgPresetReads.fetch_add(1);
+
+    const auto preset = static_cast<DlssgPresetPolicy::Preset>(MfgUnlock::SessionPreset());
+    const auto value =
+        DlssgPresetPolicy::Override(preset, MfgUnlock::EnabledForSession(),
+                                    DlssgPresetPolicy::ParseVersion(MfgUnlock::LastStatus().SnippetVersion));
+    if (!value.has_value())
+        return result;
+
+    const auto action = DlssgPresetPolicy::Classify(
+        static_cast<int32_t>(result), pSetting != nullptr, pSetting ? pSetting->version : 0, NVDRS_SETTING_VER,
+        pSetting ? static_cast<uint32_t>(pSetting->settingType) : 0xFFFFFFFF);
+
+    if (action == DlssgPresetPolicy::Action::Leave)
+    {
+        static std::atomic<bool> warned { false };
+        if (!warned.exchange(true))
+            LOG_WARN("DLSS-G preset: driver answered 0x{:X} for the preset key; preset {} not applied",
+                     static_cast<uint32_t>(result), DlssgPresetPolicy::Name(preset));
+        return result;
+    }
+
+    if (action == DlssgPresetPolicy::Action::FillMissing)
+    {
+        const auto version = pSetting->version;
+        std::memset(pSetting, 0, sizeof(*pSetting));
+        pSetting->version = version;
+        pSetting->settingId = DlssgPresetPolicy::kSettingId;
+        constexpr char name[] = "Override DLSS-FG preset";
+        for (size_t i = 0; i < sizeof(name); i++)
+            pSetting->settingName[i] = static_cast<NvU16>(name[i]);
+        pSetting->settingType = NVDRS_DWORD_TYPE;
+        result = NVAPI_OK;
+    }
+
+    pSetting->settingLocation = NVDRS_CURRENT_PROFILE_LOCATION;
+    pSetting->isCurrentPredefined = 0;
+    pSetting->u32CurrentValue = value.value();
+
+    if (NvApiHooks::dlssgPresetAnswered.exchange(value.value()) != value.value())
+        LOG_INFO("DLSS-G preset: answered the driver profile read with preset {} ({})", DlssgPresetPolicy::Name(preset),
+                 action == DlssgPresetPolicy::Action::FillMissing ? "key not in the profile"
+                                                                  : "profile value replaced");
+
+    return result;
+}
+#endif
+
 NvAPI_Status __stdcall NvApiHooks::hkNvAPI_DRS_GetSetting(NvDRSSessionHandle hSession, NvDRSProfileHandle hProfile,
                                                           NvU32 settingId, NVDRS_SETTING* pSetting)
 {
@@ -175,6 +232,12 @@ NvAPI_Status __stdcall NvApiHooks::hkNvAPI_DRS_GetSetting(NvDRSSessionHandle hSe
         return NVAPI_ERROR;
 
     auto result = o_NvAPI_DRS_GetSetting(hSession, hProfile, settingId, pSetting);
+
+#if defined(OPTISCALER_RTX40_MFG)
+    if (settingId == DlssgPresetPolicy::kSettingId)
+        return AnswerDlssgPreset(result, pSetting);
+#endif
+
     if (pSetting && result == NVAPI_OK)
     {
         constexpr NvU32 streamlineOverrideId = 0x10E41E06;

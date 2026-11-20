@@ -4,6 +4,7 @@
 #include "misc/Quirks.h"
 #include "misc/SkipSpoof.h"
 #include "framegen/IFGFeature_Dx12.h"
+#include "framegen/dlssg/MfgUnlockerSelect.h"
 #include <inputs/FG/Streamline_Inputs_Dx12.h>
 #include <inputs/FG/Streamline_Inputs_Sl1_Dx12.h>
 
@@ -187,6 +188,11 @@ class State
     FGOutput activeFgOutput = FGOutput::NoFG;
     // This should be set to a non-None value only if all other requirements are met and nvngx can be used
     FGNvngxReplacement activeFgNvngx = FGNvngxReplacement::None;
+
+    // DLSS FG/MFG unlocker chosen at config load ([DLSSG] MfgUnlock / MfgUnlocker, MfgUnlockerSelect): startup-only
+    MfgUnlockerSelect::Resolution mfgUnlocker {};
+    const char* mfgUnlockerArchSource = "none"; // EarlyGpuArch source: d3dkmt / registry / none
+    bool mfgUnlockerArchMismatch = false;       // IdentifyGpu later reported another NVIDIA family
 
     // Ampere MFG (SM86/SM75 sideload unlock): mirror of the parsed DLSSG.AmpereMfgMode value
     AmpereMfgMode ampereMfgMode = AmpereMfgMode::External;

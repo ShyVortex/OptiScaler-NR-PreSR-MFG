@@ -11,6 +11,7 @@ description: Architecture, frame generation, and safety rules for OptiScaler
      - Configuration saving (`Config.cpp`)
      - Menu UI toggles (`menu_common.cpp`)
      - Runtime execution and hooking (`MfgUnlock.cpp`, `AmpereMfgLoader.cpp`, `dllmain.cpp`)
+   - The single source of the choice is `MfgUnlockerSelect::Resolve` (rule §4, "One DLSS MFG unlocker switch"): it gives at most one owner, and the flags `FGDLSSGAdaMfgUnlock` / `FGDLSSGAmpereMfgUnlock` are written only from its result (config load) or from `MfgSectionPolicy::FlagsFor` (menu). Never set both flags anywhere else.
 
 2. **External Frame Generation Mode**:
    - Sideloaded external FG proxies (such as `dlssg_sm86.dll`) must set `State::Instance().externalFrameGeneration = true`.
@@ -28,7 +29,11 @@ description: Architecture, frame generation, and safety rules for OptiScaler
         - `AmpereMfgMaxFrames` up to 5 (6X Multi-Frame Generation on 310.9 runtime)
         - `AmpereMfgOptimized` (19–32% faster kernel execution pipeline)
         - `AmpereMfgPreset` (UI recomposition preset: Auto / A / B)
-      - Linux 2X FG FSR Fallback (`AmpereMfgLoader::ShouldFallbackToFsrFg`, `dllmain.cpp`, `menu_common.cpp`)
+      - Linux 2X FG Fallback (`AmpereMfgLoader::ShouldFallbackToFsrFg`, `dllmain.cpp`, `menu_common.cpp`)
+        - Default pipeline is XeFG (`AmpereMfgLoader::kDefaultLinuxFallbackType = "xefg"`, since 0.9.94-pre2). `auto`, empty or unknown `AmpereMfgLinuxFallbackType` resolve to it through `ResolveFallbackFgType`, and Save writes `auto` when nothing was chosen. Never add a `"fsrfg"` / `"xefg"` literal default elsewhere.
+        - An explicit `fsrfg` stays the user's choice: older builds always saved it, and those installs are deliberately not migrated.
+        - The "Fallback Pipeline" combo shows the FSR FG hint when XeFG meets an `R16G16B16A16_FLOAT` backbuffer (`state.xefgHdrFormatUnsupported`).
+        - Associated tests: `tests/linux_fallback_xefg_default_unit.cpp`, `tests/dlssg_sm86_ini_smoke.cpp`.
       - NVAPI hooks (`hkNvAPI_D3D12_SetFlipConfig`, DRS overrides in `NvApiHooks.cpp`) and Kernel hook bypasses (`Kernel_Hooks.cpp`)
       - **Turing & Ampere Native DLSSG Interface Recognition (`menu_common.cpp`)**:
         - `supportsDlssg` must recognize Turing (`0x160`, RTX 20 / GTX 16 / TITAN RTX) and Ampere (`0x170`, RTX 30) along with `ampereActive`.
@@ -103,6 +108,21 @@ description: Architecture, frame generation, and safety rules for OptiScaler
        - `tests/mfg_unlock/run.ps1` (production-backed transaction and module-lifetime tests)
        - `tests/streamline_mfg_options_unit.cpp`
        - `tests/dlssg_evaluate_feature_unit.cpp`
+     - **RTX 40 multiplier ceiling and FG preset (maintainer-accepted in 0.9.94-pre2; no RTX 40 in-game report yet)**:
+       - `[DLSSG] AdaMfgMaxFrames` (0 = unlocked 6X, 1..5) changes only `MfgUnlock::EffectiveMax` (`framegen/dlssg/AdaMfgCeiling.h`). The patch still opens 5 frames and `UnlockedMax()` still reports 5. A failed patch reports 1, and the native runtime maximum is never lowered. It is a ceiling, never a forced count. Latched per session (`SessionMaxFramesSetting`).
+       - `[DLSSG] AdaMfgPreset` (auto / a / b / c) is answered in `hkNvAPI_DRS_GetSetting` for `NGX_DLSS_FG_OVERRIDE_RENDER_PRESET_SELECTION_ID` (`0x10E41DF1`) only, after the driver's own read (`framegen/dlssg/DlssgPresetPolicy.h`): replace the value or fill `NVAPI_SETTING_NOT_FOUND`; leave errors, other types and struct versions alone; never write the NVIDIA profile. Preset C only for DLSS-G 310.9.16+. Latched per session (`SessionPreset`).
+       - Open: whether DLSS-G reads the preset through that hook. The check is the log line `DLSS-G preset: answered the driver profile read with preset B`; without it the preset needs another route, not a broader DRS override.
+       - RTX 40 needs no architecture spoof: `spoofArch(kFeatureDLSS_G)` leaves AD100+ alone and the game learns the maximum from `hkslDLSSGGetState`. Do not add RTX 40 to `shouldSpoofArch`.
+       - Associated tests: `tests/ada_mfg_ceiling_unit.cpp`, `tests/dlssg_preset_drs_unit.cpp`, `tests/ada_mfg_streamline_caps_unit.cpp`.
+   - **One DLSS MFG unlocker switch, chosen by the GPU (RTX 20/30 verified in-game on Windows and Linux, 0.9.94-pre1; RTX 40 maintainer-accepted without a tester report)**:
+     - Keys: `[DLSSG] MfgUnlock` and `MfgUnlocker` (`auto` / `ada` / `turing-ampere`). Legacy `AdaMfgUnlock` / `AmpereMfgUnlock` are still read while `MfgUnlock=auto` (`MfgUnlockerSelect::FromIni`) and saved as `auto`; never stop reading them.
+     - The choice is resolved at the first config load, inside `DllMain`, because External FG mode is decided there before IdentifyGpu runs. The architecture comes from `misc/EarlyGpuArch` (D3DKMT physical adapter ids, then the `Enum\PCI` Display entries, which Wine fills in). It must use only plain `GetModuleHandleW` / `GetProcAddress` / registry calls and load nothing: `NtdllProxy` / `KernelBaseProxy` are not initialized yet.
+     - `MfgUnlockerSelect::Resolve`: Auto follows the architecture; an explicit choice applies on its own family or when detection failed; a choice for another detected family starts nothing (never force External FG on the wrong card). The device-id table (`ClassifyNvidiaDeviceId`) was checked against all 288 pci.ids entries; GA100, GH100, Blackwell and older map to Other.
+     - Save goes through `ToSaved`: a setting that could not apply in this session (no NVIDIA GPU, mismatched choice) is kept, never dropped.
+     - `getGpuInfo` logs `DLSS FG unlocker: enabled=… choice=… arch=… (source …) -> …` and warns when IdentifyGpu disagrees with the startup detection.
+     - Menu: one `CollapsingHeader("DLSS Multi-Frame Generation (MFG)")` before the External FG early return (rule §3), driven by `menu/MfgSectionPolicy.h`. Locked without an NVIDIA GPU, on RTX 50 and on older cards (a set switch can still be turned off). The RTX 20/30 sub-block keeps every existing control unchanged. Width mark "FG: DLSS MFG unlocker" (rule §10).
+     - Packaging refuses `MfgUnlock`, `AdaMfgUnlock` or `AmpereMfgUnlock` switched on.
+     - Documentation: `docs/issues/FG/FG-UNIFIED-DLSSG-SECTION-ADA-PARITY.md`, `docs/RTX40-MFG.md`. Associated tests: `tests/mfg_unlocker_select_unit.cpp`, `tests/mfg_section_policy_unit.cpp`.
 
 5. **Permanent Workflow Branches & Integration Lifecycle**:
    - **`merge-upstream` (Permanent Branch)**:

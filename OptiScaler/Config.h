@@ -673,8 +673,19 @@ class Config
     // Frame Generation
     CustomOptional<FGInput> FGInput { FGInput::NoFG };
     CustomOptional<bool> ExternalFrameGeneration { false };
+    // [DLSSG] MfgUnlock + MfgUnlocker (auto / ada / turing-ampere): the one switch for the DLSS FG/MFG unlockers.
+    // Config load resolves them (MfgUnlockerSelect) into FGDLSSGAdaMfgUnlock / FGDLSSGAmpereMfgUnlock below, which
+    // every unlocker gate keeps reading. Without MfgUnlock the legacy AdaMfgUnlock / AmpereMfgUnlock keys decide.
+    CustomOptional<bool> FGDLSSGMfgUnlock { false };
+    CustomOptional<std::string, NoDefault> FGDLSSGMfgUnlocker; // canonical: auto / ada / turing-ampere
     CustomOptional<bool> FGDLSSGAdaMfgUnlock { false };
     CustomOptional<bool> FGDLSSGAdaBlackwellKernels { true };
+    // RTX 40 unlock: most generated frames advertised to the game, 0 = unlocked maximum (6X), 1 = 2X ... 5 = 6X.
+    // A ceiling only, never a forced multiplier (AdaMfgCeiling.h). Startup-only.
+    CustomOptional<int> FGDLSSGAdaMfgMaxFrames { 0 };
+    // RTX 40 unlock: DLSS-G render preset answered to the driver profile read (DlssgPresetPolicy.h).
+    // Canonical: Auto / A / B / C (C: DLSS-G 310.9.16+). Startup-only.
+    CustomOptional<std::string, NoDefault> FGDLSSGAdaMfgPreset;
     // Ampere/Turing (SM86/SM75) MFG unlocker — sideloads the dlssg_for_sm86 proxy
     CustomOptional<bool> FGDLSSGAmpereMfgUnlock { false };
     CustomOptional<std::string, NoDefault> FGDLSSGAmpereMfgMode; // External (default) / Internal
