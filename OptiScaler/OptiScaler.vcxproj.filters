@@ -326,6 +326,9 @@
     <ClInclude Include="menu\MenuOverlayVkPolicy.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="menu\MenuWindowOwnerPolicy.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="OwnedMutex.h">
       <Filter>Header Files</Filter>
     </ClInclude>

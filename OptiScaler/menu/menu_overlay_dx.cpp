@@ -1,6 +1,9 @@
 ﻿#include "pch.h"
 #include "menu_overlay_base.h"
 #include "menu_overlay_dx.h"
+#include "MenuWindowOwnerPolicy.h"
+
+#include <mutex>
 
 #include <Util.h>
 #include <Logger.h>
@@ -523,6 +526,45 @@ void MenuOverlayDx::CleanupRenderTarget(bool clearQueue, HWND hWnd)
         CleanupRenderTargetDx12(clearQueue);
 }
 
+// The menu stays on one window (MenuWindowOwnerPolicy, DLSS Unlocked #72). A present from another window's swapchain
+// while the owner is alive and presenting returns before any device capture, Init, Shutdown or render.
+static bool ClaimMenuWindow(HWND hWnd)
+{
+    static std::mutex ownerMutex;
+    static HWND owner = nullptr;
+    static double ownerPresentMs = 0.0;
+    static HWND lastSkipped = nullptr;
+
+    std::scoped_lock lock(ownerMutex);
+
+    const double now = Util::MillisecondsNow();
+    const bool ownerIsWindow = owner != nullptr && IsWindow(owner);
+    const auto decision = MenuWindowOwnerPolicy::Decide(owner, hWnd, ownerIsWindow, now - ownerPresentMs);
+
+    if (decision == MenuWindowOwnerPolicy::Decision::Skip)
+    {
+        if (hWnd != lastSkipped)
+        {
+            LOG_INFO("Menu stays on window {:X}; skipping swapchain present of window {:X}", (size_t) owner,
+                     (size_t) hWnd);
+            lastSkipped = hWnd;
+        }
+
+        return false;
+    }
+
+    if (decision == MenuWindowOwnerPolicy::Decision::Adopt && owner != hWnd)
+    {
+        LOG_INFO("Menu window owner {:X} -> {:X} (owner window alive: {}, silent for {:.0f} ms)", (size_t) owner,
+                 (size_t) hWnd, ownerIsWindow, owner != nullptr ? now - ownerPresentMs : 0.0);
+        owner = hWnd;
+        lastSkipped = nullptr;
+    }
+
+    ownerPresentMs = now;
+    return true;
+}
+
 void MenuOverlayDx::Present(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags,
                             const DXGI_PRESENT_PARAMETERS* pPresentParameters, IUnknown* pDevice, HWND hWnd, bool isUWP)
 {
@@ -531,6 +573,9 @@ void MenuOverlayDx::Present(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
         MenuOverlayBase::Present();
         return;
     }
+
+    if (!ClaimMenuWindow(hWnd))
+        return;
 
     LOG_DEBUG("");
 
