@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "input_system.h"
+#include "WndProcChainPolicy.h"
 
 #include <Windows.h>
 
@@ -9,6 +10,7 @@
 #include <cstdint>
 #include <mutex>
 #include <string>
+#include <vector>
 #include <winerror.h>
 #include <Xinput.h>
 
@@ -123,6 +125,10 @@ struct InputState
     HWND InputRootHwnd = nullptr;
 
     WNDPROC OriginalWndProc = nullptr;
+
+    // Windows OptiInput left while another WndProc on top still calls OptiInputWndProc (WndProcChainPolicy.h).
+    // Never cleared on shutdown: those chains keep calling us. Entries are removed on WM_NCDESTROY.
+    std::vector<WndProcChainPolicy::LostChain<HWND, WNDPROC>> LostWndProcChains;
 
     bool Initialized = false;
     bool HooksInstalled = false;
@@ -517,6 +523,8 @@ void SetInputWindow(HWND hwnd, bool useWndProcSubclass, bool explicitInputHwnd);
 bool InstallWindowSubclass(HWND hwnd);
 bool RemoveWindowSubclass(bool preserveLostChain = false);
 bool TryGetWindowProc(HWND hwnd, WNDPROC* wndProc);
+WNDPROC ForwardWndProcLocked(HWND hwnd);
+void ForgetLostWndProcChainLocked(HWND hwnd);
 void ClearTargetWindowLocked();
 void ClearInputWindowLocked();
 bool ValidateTargetWindowLocked();

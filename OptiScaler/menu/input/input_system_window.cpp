@@ -1,6 +1,8 @@
 ﻿#include "pch.h"
 #include "input_system_internal.h"
 
+#include <algorithm>
+
 namespace OptiInput
 {
 namespace
@@ -363,6 +365,41 @@ bool ValidateInputWindowLocked()
     return true;
 }
 
+// Another WndProc on top of OptiInputWndProc still calls it for this window. Keep forwarding that window's messages
+// to the procedure we wrapped, and never subclass it again while the chain stands (DLSS Unlocked #72).
+static void RememberLostWndProcChainLocked(HWND hwnd, WNDPROC original)
+{
+    // A destroyed window has no chain left; keeping it would make a new window that reuses the HWND value skip its
+    // subclass.
+    if (hwnd == nullptr || original == nullptr || !IsWindow(hwnd))
+        return;
+
+    for (auto& entry : _state.LostWndProcChains)
+    {
+        if (entry.hwnd == hwnd)
+        {
+            entry.original = original;
+            return;
+        }
+    }
+
+    _state.LostWndProcChains.push_back({ hwnd, original });
+    LOG_WARN("keeping lost WndProc chain hwnd:{} original:{} (another WndProc still calls OptiInput); lost chains:{}",
+             static_cast<void*>(hwnd), reinterpret_cast<std::uintptr_t>(original), _state.LostWndProcChains.size());
+}
+
+void ForgetLostWndProcChainLocked(HWND hwnd)
+{
+    std::erase_if(_state.LostWndProcChains, [hwnd](const auto& entry) { return entry.hwnd == hwnd; });
+}
+
+WNDPROC ForwardWndProcLocked(HWND hwnd)
+{
+    return WndProcChainPolicy::ForwardTarget<HWND, WNDPROC>(hwnd, _state.InputHwnd, _state.OriginalWndProc,
+                                                            _state.LostWndProcChains.data(),
+                                                            _state.LostWndProcChains.size());
+}
+
 bool InstallWindowSubclass(HWND hwnd)
 {
     WNDPROC currentWndProc = nullptr;
@@ -375,13 +412,48 @@ bool InstallWindowSubclass(HWND hwnd)
         return false;
     }
 
-    if (currentWndProc == OptiInputWndProc)
+    auto lost = std::find_if(_state.LostWndProcChains.begin(), _state.LostWndProcChains.end(),
+                             [hwnd](const auto& entry) { return entry.hwnd == hwnd; });
+    const bool hasLostChain = lost != _state.LostWndProcChains.end();
+
+    switch (WndProcChainPolicy::DecideInstall<WNDPROC>(currentWndProc, OptiInputWndProc, hasLostChain,
+                                                       hasLostChain ? lost->original : nullptr))
     {
+    case WndProcChainPolicy::InstallAction::AlreadyOurs:
+        // The procedure that sat on top of a lost chain removed itself: OptiInput heads the chain again.
+        if (hasLostChain)
+        {
+            _state.OriginalWndProc = lost->original;
+            _state.LostWndProcChains.erase(lost);
+        }
+
         _state.WndProcSubclassed = _state.OriginalWndProc != nullptr;
         LOG_DEBUG("InstallWindowSubclass found existing OptiInput WndProc hwnd:{} original:{} subclassed:{}",
                   static_cast<void*>(hwnd), reinterpret_cast<std::uintptr_t>(_state.OriginalWndProc),
                   _state.WndProcSubclassed ? 1 : 0);
         return _state.WndProcSubclassed;
+
+    case WndProcChainPolicy::InstallAction::ReuseLostChain:
+        // OptiInputWndProc is still called from this window's chain, below the current procedure. Installing again
+        // would store that procedure as our original and loop (DLSS Unlocked #72). Take the original back instead;
+        // messages keep reaching us through the existing chain.
+        _state.OriginalWndProc = lost->original;
+        _state.WndProcSubclassed = false;
+        _state.LostWndProcChains.erase(lost);
+        LOG_WARN("InstallWindowSubclass reusing lost WndProc chain hwnd:{} current:{} original:{}; not subclassing "
+                 "again",
+                 static_cast<void*>(hwnd), reinterpret_cast<std::uintptr_t>(currentWndProc),
+                 reinterpret_cast<std::uintptr_t>(_state.OriginalWndProc));
+        return true;
+
+    case WndProcChainPolicy::InstallAction::Install:
+        if (hasLostChain)
+        {
+            LOG_INFO("InstallWindowSubclass lost chain resolved hwnd:{}: current WndProc is back at the original",
+                     static_cast<void*>(hwnd));
+            _state.LostWndProcChains.erase(lost);
+        }
+        break;
     }
 
     SetLastError(0);
@@ -485,7 +557,11 @@ bool RemoveWindowSubclass(bool preserveLostChain)
             return false;
         }
 
-        if (_state.WndProcSubclassed || _state.OriginalWndProc != nullptr)
+        if (lostChainMayStillReferenceUs)
+        {
+            RememberLostWndProcChainLocked(_state.InputHwnd, _state.OriginalWndProc);
+        }
+        else if (_state.WndProcSubclassed || _state.OriginalWndProc != nullptr)
         {
             LOG_DEBUG("RemoveWindowSubclass clearing stale state input:{} original:{} subclassed:{}",
                       static_cast<void*>(_state.InputHwnd), reinterpret_cast<std::uintptr_t>(_state.OriginalWndProc),
@@ -522,6 +598,8 @@ bool RemoveWindowSubclass(bool preserveLostChain)
 
         if (preserveLostChain)
             return false;
+
+        RememberLostWndProcChainLocked(_state.InputHwnd, _state.OriginalWndProc);
     }
 
     _state.WndProcSubclassed = false;
