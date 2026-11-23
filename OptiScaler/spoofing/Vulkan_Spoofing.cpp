@@ -380,6 +380,23 @@ VkResult VulkanSpoofing::hkvkCreateInstance(VkInstanceCreateInfo* pCreateInfo, c
     return VK_SUCCESS;
 }
 
+PFN_vkEnumerateDeviceExtensionProperties VulkanSpoofing::RealEnumerateDeviceExtensionProperties()
+{
+    // The detour trampoline when extension spoofing hooked the export, so callers never see the spoofed entries.
+    if (o_vkEnumerateDeviceExtensionProperties != nullptr)
+        return o_vkEnumerateDeviceExtensionProperties;
+
+    // Not hooked: the loader's export itself. It dispatches through the physical device; no VkInstance is needed.
+    if (vulkanModule == nullptr)
+        vulkanModule = KernelBaseProxy::GetModuleHandleA_()("vulkan-1.dll");
+
+    if (vulkanModule == nullptr)
+        return nullptr;
+
+    return (PFN_vkEnumerateDeviceExtensionProperties) KernelBaseProxy::GetProcAddress_()(
+        vulkanModule, "vkEnumerateDeviceExtensionProperties");
+}
+
 VkResult VulkanSpoofing::hkvkCreateDevice(VkPhysicalDevice physicalDevice, VkDeviceCreateInfo* pCreateInfo,
                                           const VkAllocationCallbacks* pAllocator, VkDevice* pDevice)
 {

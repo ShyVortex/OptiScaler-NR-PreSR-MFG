@@ -19,6 +19,10 @@ class VulkanSpoofing
     static VkResult hkvkCreateInstance(VkInstanceCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator,
                                        VkInstance* pInstance);
 
+    // vkEnumerateDeviceExtensionProperties without OptiScaler's extension spoofing, for code that must know what the
+    // driver really offers (DLSS-NR's device extensions, DLSS Unlocked #73).
+    static PFN_vkEnumerateDeviceExtensionProperties RealEnumerateDeviceExtensionProperties();
+
     static PFN_vkVoidFunction hkvkGetDeviceProcAddr(const PFN_vkVoidFunction orgFunc, const char* pName);
     static PFN_vkVoidFunction hkvkGetInstanceProcAddr(const PFN_vkVoidFunction orgFunc, const char* pName);
 
