@@ -143,14 +143,10 @@ g++ -std=c++20 -o menu_window_owner_unit tests/menu_window_owner_unit.cpp && ./m
 g++ -std=c++20 -o wndproc_lost_chain_unit tests/wndproc_lost_chain_unit.cpp && ./wndproc_lost_chain_unit
 ```
 
-### 5.2 In-game confirmation (pending)
+### 5.2 In-game confirmation
 
-The reporter tests with `OverlayMenu=auto` and LogLevel 0. Expected:
-- popping a panel out no longer crashes;
-- the log shows "Menu stays on window 1E0C8C; skipping swapchain present of window 4F0968" once, and no "Handle
-  changed" flip-flop;
-- the OptiScaler menu still opens on the main window, and mouse and keyboard work in it.
-
-A "keeping lost WndProc chain" warning is harmless, and shows that fix B was needed.
-
-Interim workaround sent to the reporter (untested): `[Menu] OverlayMenu=false`.
+- The interim workaround `[Menu] OverlayMenu=false` stopped the crash (reporter, 2026-11-22). That confirms the menu
+  path as the cause.
+- Branch build `OptiScaler_v0.9.96-pre1_20261122.7z` (CI run 45042304489), with `OverlayMenu=auto`: the reporter
+  confirmed on 2026-11-24 that popping a panel out no longer crashes.
+- No log came with the confirmation, so the skip line and the "keeping lost WndProc chain" warning were not checked.
