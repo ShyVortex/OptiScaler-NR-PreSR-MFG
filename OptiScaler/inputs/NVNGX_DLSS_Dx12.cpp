@@ -614,6 +614,7 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_GetCapabilityParameters(NVSDK_NGX
             // Init external NGX table with current configuration and mark as dynamic+external
             InitNGXParameters(*OutParameters, API::DX12);
             SetNGXParamAllocType(*(*OutParameters), NGX_AllocTypes::NVDynamic);
+            DlssNr::GameNr::PublishCallbacks(D3D12Device, *OutParameters);
             return NVSDK_NGX_Result_Success;
         }
     }
@@ -622,6 +623,7 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_GetCapabilityParameters(NVSDK_NGX
     auto& params = *(new NVNGX_Parameters(API::DX12, false));
     InitNGXParameters(&params, API::DX12);
     *OutParameters = &params;
+    DlssNr::GameNr::PublishCallbacks(D3D12Device, *OutParameters);
 
     LOG_DEBUG("Returning custom Opti parameters");
 
@@ -670,6 +672,8 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_PopulateParameters_Impl(NVSDK_NGX
     {
         Nvngx_FG::D3D12_PopulateParameters_Impl(InParameters);
     }
+
+    DlssNr::GameNr::PublishCallbacks(D3D12Device, InParameters);
 
     return NVSDK_NGX_Result_Success;
 }
@@ -1081,6 +1085,7 @@ static NVSDK_NGX_Result GameNrFeatureRequirements(IDXGIAdapter* Adapter,
     if (decision != DlssNr::GameNr::Decision::Unlock)
         return result;
 
+    DlssNr::GameNr::NoteUnlocked();
     OutSupported->FeatureSupported = NVSDK_NGX_FeatureSupportResult_Supported;
     OutSupported->MinHWArchitecture = 0;
     strcpy_s(OutSupported->MinOSVersion, "10.0.10240.16384");

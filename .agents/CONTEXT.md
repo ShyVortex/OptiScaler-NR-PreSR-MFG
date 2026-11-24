@@ -166,6 +166,9 @@ Every implementation plan created for the project must document:
 ## Overlay Menu Window Owner
 - The DX overlay menu stays on the first window that presents (`MenuWindowOwnerPolicy`, `ClaimMenuWindow`); a second window's presents are skipped unless the owner is gone or silent for 1 s. OptiInput keeps a table of lost WndProc chains and never re-subclasses them. Rule §11; doc `docs/issues/FG/FG-MENU-SECONDARY-WINDOW-WNDPROC-RECURSION.md` (MSFS 2024 pop-out crash, DLSS Unlocked #72).
 
+## Game-Native NR Unlock
+- A game's own NR (NGX feature 18) is unlocked on unsupported GPUs and created through `DlssNr::CompatibilityRuntime` (`DlssNr_GameNr.h`, `DlssNr_GameNrRuntime.cpp`). Confirmed on Linux (Metro 2033 Redux, direct NGX) and on Windows (Where Winds Meet, Streamline `sl.dlss_nr`, RTX 3060). For Streamline, OptiScaler lets the module publish `DLSSNRComputeScalingRatioCallback` into the NGX parameter blocks, because the driver skips that for a disqualified module. Rule §6; docs `docs/issues/NR/NR-GAME-NATIVE-NR-UNLOCK.md`, `NR-STREAMLINE-GAME-NR-SCALING-RATIO.md`.
+
 ## Linux / Proton Notes
 - On Proton, D3D games present through DXVK / vkd3d-proton, so the Vulkan hooks and `MenuOverlayVk` also run for D3D games, on those layers' own threads. Window resizes reach the window before the Vulkan swapchains are recreated.
 - The Vulkan overlay renders at its stored swapchain image size and only on its own swapchain. `State::vulkanCreatingSC` is per thread. Rule §9 has the details and the `winedbg` method for Windows-side backtraces under Proton.

@@ -25,6 +25,8 @@ std::mutex mutex;
 std::unordered_map<const NVSDK_NGX_Handle*, std::shared_ptr<CompatibilityRuntime>> live;
 // Read every frame by OptiScaler's own NR gate; mirrors live.size() without taking the lock.
 std::atomic<size_t> liveCount { 0 };
+// Set once GetFeatureRequirements(18) reported the feature unlocked; publishing callbacks depends on it.
+std::atomic<bool> unlocked { false };
 // A runtime stays loaded until NGX shuts down: toggling NR in the game must not re-initialise it on the device, and
 // work recorded by the game's last create or evaluate may still be executing.
 std::vector<std::shared_ptr<CompatibilityRuntime>> retained;
@@ -167,6 +169,62 @@ NVSDK_NGX_Result Release(NVSDK_NGX_Handle* handle)
     const auto result = runtime->Release(handle);
     LOG_INFO("DLSS-NR (game): direct runtime ReleaseFeature(18) result=0x{:08X}", (unsigned int) result);
     return result;
+}
+
+void NoteUnlocked() { unlocked.store(true, std::memory_order_release); }
+
+bool Unlocked() { return unlocked.load(std::memory_order_acquire); }
+
+void PublishCallbacks(ID3D12Device* device, NVSDK_NGX_Parameter* params)
+{
+    if (!params || !Unlocked())
+        return;
+
+    void* callback = nullptr;
+    const auto hasCallback = [&]
+    {
+        callback = nullptr;
+        return params->Get(ScalingRatioCallbackKey, &callback) == NVSDK_NGX_Result_Success && callback != nullptr;
+    };
+
+    if (!ShouldPublishCallbacks(true, hasCallback()))
+        return;
+
+    if (!device)
+    {
+        static std::atomic<bool> warned { false };
+        if (!warned.exchange(true))
+            LOG_WARN("DLSS-NR (game): NR callbacks missing, but no D3D12 device yet to open the runtime on");
+        return;
+    }
+
+    // Same runtime CreateDirect uses later: opened and initialised on this device, kept until NGX shutdown.
+    auto runtime = CompatibilityRuntime::TryOpen(device);
+    if (!runtime)
+    {
+        static std::atomic<bool> warned { false };
+        if (!warned.exchange(true))
+            LOG_WARN("DLSS-NR (game): NR callbacks missing and no usable nvngx_dlssnr.dll to publish them");
+        return;
+    }
+    {
+        std::lock_guard lock(mutex);
+        RetainLocked(runtime);
+    }
+
+    const auto result = runtime->Populate(params);
+    const bool published = hasCallback();
+
+    static std::atomic<bool> logged { false };
+    if (!logged.exchange(true))
+    {
+        if (published)
+            LOG_INFO("DLSS-NR (game): published NR callbacks into the NGX parameters ({}={}), populate result=0x{:08X}",
+                     ScalingRatioCallbackKey, callback, (unsigned int) result);
+        else
+            LOG_WARN("DLSS-NR (game): nvngx_dlssnr.dll did not publish {}, populate result=0x{:08X}",
+                     ScalingRatioCallbackKey, (unsigned int) result);
+    }
 }
 
 bool Active() { return liveCount.load(std::memory_order_acquire) != 0; }

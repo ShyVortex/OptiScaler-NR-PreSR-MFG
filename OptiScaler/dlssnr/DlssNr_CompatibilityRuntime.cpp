@@ -135,6 +135,9 @@ struct CompatibilityRuntime::Module
     decltype(&NVSDK_NGX_D3D12_ReleaseFeature) release = nullptr;
     using Shutdown = NVSDK_NGX_Result (*)(ID3D12Device*);
     Shutdown shutdown = nullptr;
+    // Optional: publishes the module's callbacks (DLSSNRComputeScalingRatioCallback) into a parameter block.
+    using Populate = NVSDK_NGX_Result (*)(NVSDK_NGX_Parameter*);
+    Populate populate = nullptr;
 
     ~Module()
     {
@@ -207,6 +210,8 @@ std::shared_ptr<CompatibilityRuntime> CompatibilityRuntime::Open(const std::file
             loaded->evaluate = reinterpret_cast<decltype(loaded->evaluate)>(symbol("NVSDK_NGX_D3D12_EvaluateFeature"));
             loaded->release = reinterpret_cast<decltype(loaded->release)>(symbol("NVSDK_NGX_D3D12_ReleaseFeature"));
             loaded->shutdown = reinterpret_cast<Module::Shutdown>(symbol("NVSDK_NGX_D3D12_Shutdown1"));
+            // Not required: older runtimes still open without it.
+            loaded->populate = reinterpret_cast<Module::Populate>(symbol("NVSDK_NGX_D3D12_PopulateParameters_Impl"));
             if (!loaded->init || !loaded->create || !loaded->evaluate || !loaded->release || !loaded->shutdown)
             {
                 LOG_ERROR("NR compatibility: {} is missing required NR exports", path.string());
@@ -321,6 +326,17 @@ NVSDK_NGX_Result CompatibilityRuntime::Evaluate(ID3D12GraphicsCommandList* comma
     std::lock_guard lock(module->mutex);
     CallerScope caller;
     return module->evaluate(commands, feature, params, nullptr);
+}
+
+NVSDK_NGX_Result CompatibilityRuntime::Populate(NVSDK_NGX_Parameter* params)
+{
+    if (!params)
+        return NVSDK_NGX_Result_FAIL_InvalidParameter;
+    std::lock_guard lock(module->mutex);
+    if (!module->populate)
+        return NVSDK_NGX_Result_FAIL_FeatureNotSupported;
+    CallerScope caller;
+    return module->populate(params);
 }
 
 NVSDK_NGX_Result CompatibilityRuntime::Release(NVSDK_NGX_Handle* feature)

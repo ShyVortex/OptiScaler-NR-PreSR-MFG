@@ -162,9 +162,11 @@ The harnesses that compile production slices got matching seams: `OwnNrEnabled` 
   - Preload loads at start-up (81 ms).
   - An apparent frame-rate drop with Preload on could not be reproduced (other apps were open; the log showed no NR
     activity before the first toggle).
-- **Not yet checked:** Windows in game (an unsupported GPU on a ≥ 610.88 driver).
+- **Windows in game:** confirmed in Where Winds Meet (RTX 3060 Laptop, driver 621.35, v0.9.96-pre3), through Streamline
+  `sl.dlss_nr`. See [NR-STREAMLINE-GAME-NR-SCALING-RATIO.md](NR-STREAMLINE-GAME-NR-SCALING-RATIO.md) §5.2.
 
 ## 6. Out of Scope
-- Streamline-based NR integrations in other games.
+- Streamline-based NR integrations in other games. Streamline's `sl.dlss_nr` on an unsupported GPU is covered in
+  [NR-STREAMLINE-GAME-NR-SCALING-RATIO.md](NR-STREAMLINE-GAME-NR-SCALING-RATIO.md) (Where Winds Meet).
 - Vulkan / DX11 game-native NR.
 - The 610.88–616.63 note in `NR-OLD-DRIVER-HANG.md`: if such a driver answers `FAIL_OutOfDate`, it stays refused.
