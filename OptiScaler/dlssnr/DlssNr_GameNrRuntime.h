@@ -18,6 +18,12 @@ NVSDK_NGX_Result Evaluate(ID3D12GraphicsCommandList* commands, const NVSDK_NGX_H
 NVSDK_NGX_Result Release(NVSDK_NGX_Handle* handle);
 // "Preload NR": load and initialise the direct runtime on this device now, and keep it until NGX shutdown.
 void Preload(ID3D12Device* device);
+// GetFeatureRequirements(18) reported the feature unlocked to the game in this session.
+void NoteUnlocked();
+bool Unlocked();
+// Once unlocked: let the direct runtime publish its callbacks (DLSSNRComputeScalingRatioCallback) into a block the
+// game got from NGX, when the driver left them out. Streamline's sl.dlss_nr needs them before it creates feature 18.
+void PublishCallbacks(ID3D12Device* device, NVSDK_NGX_Parameter* params);
 // True while the game has a live NR feature; OptiScaler's own NR yields to it.
 bool Active();
 // NGX shutdown: release what the game left behind and drop the retained runtimes.
