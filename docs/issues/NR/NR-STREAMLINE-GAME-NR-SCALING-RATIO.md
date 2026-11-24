@@ -119,10 +119,20 @@ g++ -std=c++20 -o nr_streamline_scaling_ratio_unit tests/nr_streamline_scaling_r
 ./nr_streamline_scaling_ratio_unit
 ```
 
-### 5.2 In-game confirmation (pending)
+### 5.2 In-game confirmation (confirmed, 2026-11-24)
 
-The reporter tests with LogLevel 0 and the game's NR turned on. Expected:
-- `DLSS-NR (game): published NR callbacks into the NGX parameters` in `OptiScaler.log`;
-- no more `scaling-ratio computation callback is missing`;
-- `DLSS-NR (game): direct runtime CreateFeature(18) result=0x00000001`;
-- a visible NR effect in game.
+The reporter confirmed that the game's NR works with v0.9.96-pre3 (`52f3ec3`, CI run 45418143387) on the same RTX
+3060 Laptop and Windows 11 setup. They attached a LogLevel 0 log:
+
+| Time | Line |
+|---|---|
+| 02:24:21.47 | `GetFeatureRequirements(18) driver result 0x00000001, support bits 0x4 -> unlock` |
+| 02:24:25.36 | `published NR callbacks into the NGX parameters (DLSSNRComputeScalingRatioCallback=0x7ff92ecc2740), populate result=0x00000001` |
+| 02:25:50.94 | `direct runtime CreateFeature(18) result=0x00000001`, 1920x1080 |
+
+- `scaling-ratio computation callback is missing` appears 0 times (1407 before the fix).
+- There are no NR warnings or errors after the create. Streamline logs one `Unable to find 'dlssnr' constants for frame
+  3338`, which it marks as harmless.
+- This is the first Windows confirmation of the direct runtime (§4.2's second risk).
+- The game's preset hint is `2147483650` (`0x80000002`), which `ModelName` reports as an unknown preset. It works;
+  the meaning of the high bit is not known.
