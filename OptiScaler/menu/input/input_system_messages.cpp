@@ -715,7 +715,7 @@ LRESULT CALLBACK OptiInputWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
 
         {
             std::unique_lock lock(_state.Mutex);
-            originalWndProc = _state.OriginalWndProc;
+            originalWndProc = ForwardWndProcLocked(hwnd);
         }
 
         if (originalWndProc != nullptr)
@@ -731,7 +731,9 @@ LRESULT CALLBACK OptiInputWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
     {
         std::unique_lock lock(_state.Mutex);
 
-        originalWndProc = _state.OriginalWndProc;
+        // Forward by window: a lost chain on a window OptiInput has left must reach that window's own original,
+        // never the current input window's (DLSS Unlocked #72).
+        originalWndProc = ForwardWndProcLocked(hwnd);
         OPTIINPUT_LOG_VERBOSE("WndProc dispatch hwnd:{} msg:{}({:#x}) input:{} original:{} menu:{} focused:{}",
                               static_cast<void*>(hwnd), WindowMessageName(msg), static_cast<unsigned>(msg),
                               static_cast<void*>(_state.InputHwnd), reinterpret_cast<std::uintptr_t>(originalWndProc),
@@ -751,6 +753,18 @@ LRESULT CALLBACK OptiInputWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
             DefWindowProcW(hwnd, msg, wParam, lParam);
 
         return 0;
+    }
+
+    if (msg == WM_NCDESTROY)
+    {
+        // Last message for this window: forward it, then drop any lost-chain entry so a reused HWND value never
+        // inherits it.
+        const LRESULT result = originalWndProc != nullptr ? CallWindowProcW(originalWndProc, hwnd, msg, wParam, lParam)
+                                                          : DefWindowProcW(hwnd, msg, wParam, lParam);
+
+        std::unique_lock lock(_state.Mutex);
+        ForgetLostWndProcChainLocked(hwnd);
+        return result;
     }
 
     if (originalWndProc != nullptr)
