@@ -111,7 +111,12 @@ g++ -std=c++20 -Iexternal/vulkan/include -o nr_vk_extension_enumerate_unit tests
 ./nr_vk_extension_enumerate_unit
 ```
 
-### 5.2 In-game confirmation (pending)
+### 5.2 Linux regression check (done)
+
+Metro 2033 Redux on Linux with `[DlssNr] Enabled=true` (the in-game confirmed Linux NR path, which runs through the
+same `hkvkCreateDevice` block): NR starts and works with the fix (maintainer, 2026-11-25).
+
+### 5.3 In-game confirmation in GTA V Enhanced (pending)
 
 The reporter tests with `[DlssNr] Enabled=true` and LogLevel 0. Expected:
 - the game starts;
