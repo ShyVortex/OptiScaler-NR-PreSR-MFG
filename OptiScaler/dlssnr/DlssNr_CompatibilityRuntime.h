@@ -29,6 +29,9 @@ class CompatibilityRuntime
     NVSDK_NGX_Result Create(ID3D12GraphicsCommandList*, NVSDK_NGX_Parameter*, NVSDK_NGX_Handle**);
     NVSDK_NGX_Result Evaluate(ID3D12GraphicsCommandList*, const NVSDK_NGX_Handle*, NVSDK_NGX_Parameter*);
     NVSDK_NGX_Result Release(NVSDK_NGX_Handle*);
+    // Lets the module publish its callbacks into a parameter block (its PopulateParameters_Impl export), as the
+    // driver does for a module it accepted. FAIL_FeatureNotSupported when the module has no such export.
+    NVSDK_NGX_Result Populate(NVSDK_NGX_Parameter*);
 
   private:
     struct Module;

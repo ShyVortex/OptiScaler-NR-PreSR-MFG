@@ -59,6 +59,15 @@ constexpr bool ShouldCreateDirect(bool onWine, bool enabled, bool hasCandidate, 
            Decide(onWine, enabled, hasCandidate, driverBlocked, createResult, 0) == Decision::Unlock;
 }
 
+// Streamline's sl.dlss_nr reads this callback from the NGX parameter blocks before it creates feature 18. The NR
+// module publishes it from its PopulateParameters_Impl export, which the driver calls only for a module it accepted.
+// On a GPU the module doesn't target (an RTX 30 with a 0x1B0 build) the driver never calls it, and Streamline stops.
+inline constexpr const char* ScalingRatioCallbackKey = "DLSSNRComputeScalingRatioCallback";
+
+// Publish the module's callbacks into a block only when this session unlocked feature 18 and the driver left them out.
+// A GPU the driver supports never unlocks, and a block that already has the callback is left alone.
+constexpr bool ShouldPublishCallbacks(bool unlocked, bool hasCallback) { return unlocked && !hasCallback; }
+
 // "Preload NR": load the direct runtime at the game's NGX init, never on a Windows driver below the 610.88 gate.
 constexpr bool ShouldPreload(bool enabled, bool hasCandidate, bool driverBlocked)
 {
