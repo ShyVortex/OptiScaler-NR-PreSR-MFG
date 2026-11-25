@@ -26,18 +26,17 @@ struct Merged
     std::vector<const char*> names;
 };
 
-inline std::vector<std::string> SupportedDeviceExtensions(PFN_vkGetInstanceProcAddr getInstanceProcAddr,
-                                                          VkInstance instance, VkPhysicalDevice physicalDevice)
+// What the physical device offers. vkEnumerateDeviceExtensionProperties dispatches through the physical device, so no
+// VkInstance is involved: a captured instance can belong to another layer or be destroyed already (DXVK's D3D11 device
+// in GTA V Enhanced, DLSS Unlocked #73: the loader rejected the stale instance and Wine aborted the game). Pass the
+// unhooked function (VulkanSpoofing::RealEnumerateDeviceExtensionProperties): the extension spoofing hook adds
+// entries the driver does not have.
+inline std::vector<std::string> SupportedDeviceExtensions(PFN_vkEnumerateDeviceExtensionProperties enumerate,
+                                                          VkPhysicalDevice physicalDevice)
 {
     std::vector<std::string> out;
 
-    if (getInstanceProcAddr == nullptr || physicalDevice == VK_NULL_HANDLE)
-        return out;
-
-    auto enumerate = (PFN_vkEnumerateDeviceExtensionProperties) getInstanceProcAddr(
-        instance, "vkEnumerateDeviceExtensionProperties");
-
-    if (enumerate == nullptr)
+    if (enumerate == nullptr || physicalDevice == VK_NULL_HANDLE)
         return out;
 
     uint32_t count = 0;
@@ -50,6 +49,7 @@ inline std::vector<std::string> SupportedDeviceExtensions(PFN_vkGetInstanceProcA
     if (enumerate(physicalDevice, nullptr, &count, props.data()) != VK_SUCCESS)
         return out;
 
+    props.resize(count);
     out.reserve(count);
 
     for (const auto& p : props)
