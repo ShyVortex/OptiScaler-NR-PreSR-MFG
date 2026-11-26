@@ -18,6 +18,7 @@
 // 1. AppliesInMode: no override in External FG mode.
 // 2. The menu text names the mode and the alternatives.
 // 3. Both present sites (LocalPresent, FGHooks::FGPresent) decide the override through the policy.
+// 4. Menu: warning, V-Sync On / Off / Sync Int. disabled, Reset still usable; INI note.
 //
 // Build (repository root):
 //   g++ -std=c++20 -Wall -Wextra -o /tmp/vsync_external_mode_unit tests/vsync_external_mode_unit.cpp
@@ -107,6 +108,41 @@ int main()
         for (const std::string* file : { &wrapped, &fgHooks })
             assert(file->find("#include <misc/VsyncOverridePolicy.h>") != std::string::npos);
         std::printf("  [PASS] Test 3: LocalPresent and FGPresent skip the override in External mode.\n");
+    }
+
+    // Test 4
+    {
+        const std::string menu = ReadFile("OptiScaler/menu/menu_common.cpp");
+        assert(menu.find("#include <misc/VsyncOverridePolicy.h>") != std::string::npos);
+
+        const std::string section =
+            Between(menu, "ScopedCollapsingHeader(\"V-Sync Settings\")", "ScopedCollapsingHeader(\"Mipmap Bias\"");
+        assert(section.find(
+                   "const bool vsyncAvailable = VsyncOverridePolicy::AppliesInMode(state.externalFrameGeneration);") !=
+               std::string::npos);
+
+        // The warning comes before the controls, and only in External mode.
+        const size_t warning = section.find("VsyncOverridePolicy::ExternalModeMessage");
+        assert(warning != std::string::npos);
+        assert(section.rfind("if (!vsyncAvailable)", warning) != std::string::npos);
+        assert(warning < section.find("ImGui::BeginDisabled(!vsyncAvailable);"));
+
+        // V-Sync On, V-Sync Off and Sync Int. sit inside the External-mode disabled block; Reset sits after it.
+        assert(Count(section, "ImGui::BeginDisabled(") == 2);
+        assert(Count(section, "ImGui::EndDisabled();") == 2);
+        const std::string controls =
+            Between(section, "ImGui::BeginDisabled(!vsyncAvailable);", "ImGui::EndDisabled(); // !vsyncAvailable");
+        assert(controls.find("ImGui::Checkbox(\"V-Sync On\"") != std::string::npos);
+        assert(controls.find("ImGui::Checkbox(\"V-Sync Off\"") != std::string::npos);
+        assert(controls.find("ImGui::BeginCombo(\"Sync Int.\"") != std::string::npos);
+        assert(controls.find("ImGui::Button(\"Reset##10\")") == std::string::npos);
+        assert(section.find("ImGui::Button(\"Reset##10\")") > section.find("ImGui::EndDisabled(); // !vsyncAvailable"));
+
+        // The INI says so too.
+        const std::string ini = ReadFile("OptiScaler.ini");
+        const std::string vsyncIni = Between(ini, "[V-Sync]", "SyncInterval=auto");
+        assert(vsyncIni.find("Not applied in External FG mode") < vsyncIni.find("ForceVsync=auto"));
+        std::printf("  [PASS] Test 4: the menu warns and disables the override in External mode; Reset stays.\n");
     }
 
     std::printf("All V-Sync override External FG mode tests passed.\n");
