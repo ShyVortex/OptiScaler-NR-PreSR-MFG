@@ -54,6 +54,7 @@
 #include <type_traits>
 #include <misc/IdentifyGpu.h>
 #include <misc/FrameLimitPolicy.h>
+#include <misc/VsyncOverridePolicy.h>
 #include <hooks/Xell_Hooks.h>
 #include <hooks/GameXeFG_Hooks.h>
 #include <low_latency/input/input_common.h>
@@ -8334,6 +8335,18 @@ void MenuCommon::RenderApiAndTextureSettings(RenderMenuContext& ctx)
             auto forceVsyncOff = config->ForceVsync.has_value() && !config->ForceVsync.value();
             bool vsyncChanged = false;
 
+            // External FG mode never applies the override: say so, and keep the controls visible but disabled.
+            // Reset stays usable so a saved value can still be cleared (ShyVortex/DLSS-Unlocked#75).
+            const bool vsyncAvailable = VsyncOverridePolicy::AppliesInMode(state.externalFrameGeneration);
+            if (!vsyncAvailable)
+            {
+                ImGui::TextColored(toneMapColor(ImVec4(1.f, 0.8f, 0.f, 1.f)), "%s",
+                                   VsyncOverridePolicy::ExternalModeMessage);
+                ImGui::Spacing();
+            }
+
+            ImGui::BeginDisabled(!vsyncAvailable);
+
             if (ImGui::Checkbox("V-Sync On", &forceVsyncOn))
             {
                 if (forceVsyncOn)
@@ -8407,7 +8420,8 @@ void MenuCommon::RenderApiAndTextureSettings(RenderMenuContext& ctx)
                            "Higher values can reduce tearing but may increase latency and cap FPS.\n"
                            "For most games, use 0 for lowest latency or 1 for normal VSync.");
 
-            ImGui::EndDisabled();
+            ImGui::EndDisabled(); // !forceVsyncOn
+            ImGui::EndDisabled(); // !vsyncAvailable
             ImGui::SameLine(0.0f, 16.0f);
 
             if (ImGui::Button("Reset##10"))

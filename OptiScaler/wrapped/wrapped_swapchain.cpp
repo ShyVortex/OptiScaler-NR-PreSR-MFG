@@ -16,6 +16,7 @@
 #include <menu/menu_overlay_dx.h>
 
 #include <misc/FrameLimit.h>
+#include <misc/VsyncOverridePolicy.h>
 
 #include <d3d11.h>
 #include <d3d12.h>
@@ -419,7 +420,8 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
     }
 
     // Fallback when FGPresent is not hooked for V-sync
-    if (willPresent && Config::Instance()->ForceVsync.has_value() && !State::Instance().externalFrameGeneration)
+    if (willPresent && Config::Instance()->ForceVsync.has_value() &&
+        VsyncOverridePolicy::AppliesInMode(State::Instance().externalFrameGeneration))
     {
         LOG_DEBUG("ForceVsync: {}, VsyncInterval: {}, SCAllowTearing: {}, realExclusiveFullscreen: {}",
                   Config::Instance()->ForceVsync.value(), Config::Instance()->VsyncInterval.value_or_default(),
