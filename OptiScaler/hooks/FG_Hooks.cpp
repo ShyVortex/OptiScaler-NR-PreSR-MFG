@@ -14,6 +14,7 @@
 #include <resource_tracking/ResTrack_Dx12.h>
 
 #include <misc/FrameLimit.h>
+#include <misc/VsyncOverridePolicy.h>
 
 #include <misc/IdentifyGpu.h>
 #include <hooks/Reflex_Hooks.h>
@@ -1260,7 +1261,8 @@ HRESULT FGHooks::FGPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags,
         Hudfix_Dx12::PresentStart();
     }
 
-    if (willPresent && config->ForceVsync.has_value())
+    if (willPresent && config->ForceVsync.has_value() &&
+        VsyncOverridePolicy::AppliesInMode(state.externalFrameGeneration))
     {
         LOG_DEBUG("ForceVsync: {}, VsyncInterval: {}, SCAllowTearing: {}, realExclusiveFullscreen: {}",
                   config->ForceVsync.value(), config->VsyncInterval.value_or_default(), state.SCAllowTearing,
