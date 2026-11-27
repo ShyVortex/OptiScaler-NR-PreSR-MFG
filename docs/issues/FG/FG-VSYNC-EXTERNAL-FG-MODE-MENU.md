@@ -86,5 +86,6 @@ No runtime behaviour changes.
 - Related tests still pass: `fps_limit_external_mode_unit` (5/5), `menu_width_unit` (7/7),
   `mfg_section_policy_unit` (54 checks).
 - clang-format 23.1.5 `--dry-run --Werror` clean; UTF-8 BOM present on every changed C++ file.
-- Pending: a Windows CI build and an in-game check of the menu (External FG on: the note is shown and the controls are
-  greyed out; External FG off: unchanged).
+- Checked in game by the maintainer (2026-11-27): with External FG on the note is shown and V-Sync On / Off / Sync Int.
+  are greyed out; with External FG off the section is unchanged. Merged to `main` in
+  [PR #43](https://github.com/ShyVortex/OptiScaler-NR-PreSR-MFG/pull/43), released in v0.9.97.

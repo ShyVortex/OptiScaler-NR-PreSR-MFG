@@ -300,6 +300,11 @@ description: Architecture, frame generation, and safety rules for OptiScaler
              - Its fallback sleep stays: it is the only fallback sleep under DXVK (`48087c67`).
            - Documentation: `docs/issues/FG/FG-FPS-LIMIT-XEMFG-PACING-AND-SYNC.md`.
            - Associated tests: `tests/xefg_cap_step_unit.cpp`, `tests/fps_limit_resync_unit.cpp`, `tests/frame_limit_multiplier_unit.cpp`, `tests/fps_limit_external_mode_unit.cpp`, `tests/reflex_fg_count_flap_unit.cpp`, `tests/fps_limit_dxvk_owner_unit.cpp`, `tests/xell_game_context_limit_unit.cpp`.
+     - **V-Sync override in External FG mode (verified in-game, menu check; [DLSS Unlocked #75](https://github.com/ShyVortex/DLSS-Unlocked/issues/75))**:
+       - In External FG mode the game's DLSS-G presents the generated frames, so OptiScaler never applies `[V-Sync] ForceVsync` / `SyncInterval` there (`e5b129ad`). `LocalPresent` (`wrapped_swapchain.cpp`) and `FGHooks::FGPresent` decide only through `VsyncOverridePolicy::AppliesInMode` (`OptiScaler/misc/VsyncOverridePolicy.h`); never inline the `externalFrameGeneration` check again.
+       - The menu's "V-Sync Settings" shows the amber `ExternalModeMessage` and disables "V-Sync On", "V-Sync Off" and "Sync Int." in that mode; "Reset" stays enabled and nothing is written to the config. Same pattern as the FPS limiter (`FrameLimitPolicy::AppliesInMode`).
+       - Never force `SyncInterval=1` / strip the tearing flag on the unlocker's DLSS-G presents as a tearing fix: it was tried for XeMFG and kept only as opt-in `ExtraPacing`. For tearing with the RTX 20/30 unlocker, point users to XeMFG + Extra Pacing + an output FPS cap.
+       - Documentation: `docs/issues/FG/FG-VSYNC-EXTERNAL-FG-MODE-MENU.md`. Associated test: `tests/vsync_external_mode_unit.cpp`.
      - **Multiplier Ceiling Uncap (`XeFG_Dx12.cpp`)**:
        - `_maxInterpolationCount` must be initialized to `std::max(_maxInterpolationCount, 5)` in `CreateSwapchain` / `CreateSwapchain1` when `XeMfgLoader::EnabledForSession()`.
        - `SetInterpolatedFrameCount` and `Dispatch` must compute `effectiveMax` via `std::max(_maxInterpolationCount, XeMfgLoader::EffectiveMax(_maxInterpolationCount))` rather than stock ceiling 1, dynamically raising `_maxInterpolationCount` and synchronizing `XeMfgLoader::SetMaxGeneratedFrames(count)` live.
@@ -375,6 +380,7 @@ description: Architecture, frame generation, and safety rules for OptiScaler
        - `tests/fps_limit_resync_unit.cpp` (Tests 1–7)
        - `tests/frame_limit_multiplier_unit.cpp` (Tests 1–5)
        - `tests/fps_limit_external_mode_unit.cpp` (Tests 1–5)
+       - `tests/vsync_external_mode_unit.cpp` (Tests 1–4)
        - `tests/reflex_fg_count_flap_unit.cpp` (Tests 1–5)
        - `tests/fps_limit_dxvk_owner_unit.cpp` (Tests 1–3)
        - `tests/xell_game_context_limit_unit.cpp` (Tests 1–5)
